@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <avr/io.h>
+#include <avr/interrupt.h>
 #include <util/atomic.h>
 #include <ctype.h>
 #include <math.h>
@@ -11,7 +12,23 @@
 #error "Select Arduino Uno (ATmega328P, 16 MHz)."
 #endif
 
-// D9 = throttle (OC1A), D10 = steering (OC1B).
+// Choose two distinct pins: D2..D13 or A0..A5. Edit these and upload again.
+// D0/D1 are reserved for serial. D9/D10 (in either order) use hardware PWM;
+// other pairs use Timer1 interrupts and have some interrupt-related edge jitter.
+#ifndef THROTTLE_PIN
+#define THROTTLE_PIN 9
+#endif
+#ifndef STEERING_PIN
+#define STEERING_PIN 10
+#endif
+static_assert(THROTTLE_PIN >= 2 && THROTTLE_PIN <= A5,
+              "Throttle pin must be D2..D13 or A0..A5");
+static_assert(STEERING_PIN >= 2 && STEERING_PIN <= A5,
+              "Steering pin must be D2..D13 or A0..A5");
+static_assert(THROTTLE_PIN != STEERING_PIN, "Output pins must be different");
+constexpr bool HARDWARE_PWM = (THROTTLE_PIN == 9 && STEERING_PIN == 10) ||
+                              (THROTTLE_PIN == 10 && STEERING_PIN == 9);
+
 // Set true and upload again to run PROGRAM once on each power-up/reset.
 constexpr bool AUTO_RUN_ON_BOOT = false;
 constexpr uint32_t STARTUP_NEUTRAL_MS = 5000;
@@ -37,43 +54,122 @@ char inputLine[80];
 uint8_t inputLength = 0;
 bool inputOverflow = false;
 
+// For arbitrary pins, the main loop queues pulse widths and the frame ISR
+// snapshots them together. Register pointers avoid slow digitalWrite() in ISRs.
+volatile uint16_t requestedGasTicks;
+volatile uint16_t requestedTurnTicks;
+volatile uint8_t* gasPort;
+volatile uint8_t* turnPort;
+uint8_t gasMask;
+uint8_t turnMask;
+uint16_t activeGasTicks;
+uint16_t activeTurnTicks;
+bool gasEdgePending;
+bool turnEdgePending;
+
+// Called only with interrupts disabled. Service edges that are already due
+// immediately, including coincident edges and those closer than ISR latency.
+// This avoids scheduling a compare in the past and missing a falling edge.
+void scheduleFallingEdges() {
+  while (gasEdgePending || turnEdgePending) {
+    const uint16_t gasEdge = gasEdgePending ? activeGasTicks : rover::PERIOD_TICKS;
+    const uint16_t turnEdge = turnEdgePending ? activeTurnTicks : rover::PERIOD_TICKS;
+    const uint16_t nextEdge = gasEdge < turnEdge ? gasEdge : turnEdge;
+    OCR1B = nextEdge;
+    TIFR1 = _BV(OCF1B);
+    const uint16_t now = TCNT1;
+    if (now < nextEdge) {
+      TIMSK1 |= _BV(OCIE1B);
+      return;
+    }
+    if (gasEdgePending && activeGasTicks <= now) {
+      *gasPort &= ~gasMask;
+      gasEdgePending = false;
+    }
+    if (turnEdgePending && activeTurnTicks <= now) {
+      *turnPort &= ~turnMask;
+      turnEdgePending = false;
+    }
+  }
+  TIMSK1 &= ~_BV(OCIE1B);
+}
+
+ISR(TIMER1_COMPA_vect) {
+  // In the arbitrary-pin backend, compare A resets the counter each frame.
+  activeGasTicks = requestedGasTicks;
+  activeTurnTicks = requestedTurnTicks;
+  if (activeGasTicks) *gasPort |= gasMask;
+  else *gasPort &= ~gasMask;
+  if (activeTurnTicks) *turnPort |= turnMask;
+  else *turnPort &= ~turnMask;
+  gasEdgePending = activeGasTicks > 0 && activeGasTicks < rover::PERIOD_TICKS;
+  turnEdgePending = activeTurnTicks > 0 && activeTurnTicks < rover::PERIOD_TICKS;
+  scheduleFallingEdges();
+}
+
+ISR(TIMER1_COMPB_vect) {
+  scheduleFallingEdges();
+}
+
 void writeOutputs() {
   const uint16_t gasTicks = rover::dutyTicks(gasDuty);
   const uint16_t turnTicks = rover::dutyTicks(turnDuty);
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    // Compare registers are double-buffered by Timer1. Disconnect PWM for
-    // exact 0% and 100% so there are no narrow endpoint pulses.
-    OCR1A = gasTicks;
-    OCR1B = turnTicks;
-    if (gasDuty == 0 || gasDuty == 10000) {
-      if (gasDuty == 10000) PORTB |= _BV(PB1);
-      else PORTB &= ~_BV(PB1);
-      TCCR1A &= ~_BV(COM1A1);
-    } else TCCR1A |= _BV(COM1A1);
-    if (turnDuty == 0 || turnDuty == 10000) {
-      if (turnDuty == 10000) PORTB |= _BV(PB2);
-      else PORTB &= ~_BV(PB2);
-      TCCR1A &= ~_BV(COM1B1);
-    } else TCCR1A |= _BV(COM1B1);
+    if (!HARDWARE_PWM) {
+      requestedGasTicks = gasTicks;
+      requestedTurnTicks = turnTicks;
+    } else {
+      const uint16_t dutyA = THROTTLE_PIN == 9 ? gasDuty : turnDuty;
+      const uint16_t dutyB = THROTTLE_PIN == 9 ? turnDuty : gasDuty;
+      // Compare registers are double-buffered by Timer1. Disconnect PWM for
+      // exact 0% and 100% so there are no narrow endpoint pulses.
+      OCR1A = THROTTLE_PIN == 9 ? gasTicks : turnTicks;
+      OCR1B = THROTTLE_PIN == 9 ? turnTicks : gasTicks;
+      if (dutyA == 0 || dutyA == 10000) {
+        if (dutyA == 10000) PORTB |= _BV(PB1);
+        else PORTB &= ~_BV(PB1);
+        TCCR1A &= ~_BV(COM1A1);
+      } else TCCR1A |= _BV(COM1A1);
+      if (dutyB == 0 || dutyB == 10000) {
+        if (dutyB == 10000) PORTB |= _BV(PB2);
+        else PORTB &= ~_BV(PB2);
+        TCCR1A &= ~_BV(COM1B1);
+      } else TCCR1A |= _BV(COM1B1);
+    }
   }
 }
 
 void beginSignals() {
-  pinMode(9, OUTPUT);
-  pinMode(10, OUTPUT);
-  digitalWrite(9, LOW);
-  digitalWrite(10, LOW);
+  pinMode(THROTTLE_PIN, OUTPUT);
+  pinMode(STEERING_PIN, OUTPUT);
+  digitalWrite(THROTTLE_PIN, LOW);
+  digitalWrite(STEERING_PIN, LOW);
+  gasPort = portOutputRegister(digitalPinToPort(THROTTLE_PIN));
+  turnPort = portOutputRegister(digitalPinToPort(STEERING_PIN));
+  gasMask = digitalPinToBitMask(THROTTLE_PIN);
+  turnMask = digitalPinToBitMask(STEERING_PIN);
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
     TCCR1A = 0;
     TCCR1B = 0;
     TIMSK1 = 0;
+    TIFR1 = _BV(OCF1A) | _BV(OCF1B) | _BV(TOV1);
     TCNT1 = 0;
-    ICR1 = rover::PERIOD_TICKS - 1;
-    OCR1A = rover::dutyTicks(gasDuty);
-    OCR1B = rover::dutyTicks(turnDuty);
-    // Fast PWM mode 14, non-inverting outputs, /8 clock.
-    TCCR1A = _BV(COM1A1) | _BV(COM1B1) | _BV(WGM11);
-    TCCR1B = _BV(WGM13) | _BV(WGM12) | _BV(CS11);
+    if (HARDWARE_PWM) {
+      ICR1 = rover::PERIOD_TICKS - 1;
+      OCR1A = rover::dutyTicks(THROTTLE_PIN == 9 ? gasDuty : turnDuty);
+      OCR1B = rover::dutyTicks(THROTTLE_PIN == 9 ? turnDuty : gasDuty);
+      // Fast PWM mode 14, non-inverting outputs, /8 clock.
+      TCCR1A = _BV(COM1A1) | _BV(COM1B1) | _BV(WGM11);
+      TCCR1B = _BV(WGM13) | _BV(WGM12) | _BV(CS11);
+    } else {
+      requestedGasTicks = rover::dutyTicks(gasDuty);
+      requestedTurnTicks = rover::dutyTicks(turnDuty);
+      OCR1A = rover::PERIOD_TICKS - 1;
+      TCNT1 = OCR1A;  // First frame begins on the next timer tick.
+      TIMSK1 = _BV(OCIE1A);
+      // CTC mode 4, /8 clock. Compare A starts frames; B ends pulses.
+      TCCR1B = _BV(WGM12) | _BV(CS11);
+    }
   }
 }
 
@@ -112,6 +208,8 @@ void printDuty(uint16_t duty) {
 void status() {
   Serial.print(F("Gas=")); printDuty(gasDuty);
   Serial.print(F(" Turn=")); printDuty(turnDuty);
+  Serial.print(F(" Pins(gas/turn)="));
+  Serial.print(THROTTLE_PIN); Serial.print('/'); Serial.print(STEERING_PIN);
   Serial.print(F(" Mode="));
   if (autoPending) Serial.println(F("startup neutral"));
   else if (sequence.running()) {
