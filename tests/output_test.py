@@ -26,7 +26,8 @@ static void digitalWrite(uint8_t p, uint8_t v) {
   if (v) ports[digitalPinToPort(p)] |= digitalPinToBitMask(p);
   else ports[digitalPinToPort(p)] &= ~digitalPinToBitMask(p);
 }
-static uint32_t millis() { return 0; }
+static uint32_t fakeMillis = 0;
+static uint32_t millis() { return fakeMillis; }
 static volatile uint16_t OCR1A, OCR1B, ICR1, TCNT1;
 static volatile uint8_t TCCR1A, TCCR1B, TIMSK1, TIFR1;
 #define PORTB ports[1]
@@ -46,6 +47,11 @@ HARNESS = r"""
 #include "RoverController.ino"
 static bool high(uint8_t pin) {
   return ports[digitalPinToPort(pin)] & digitalPinToBitMask(pin);
+}
+static void send(const char* text) {
+  char line[80];
+  strcpy(line, text);
+  command(line);
 }
 int main() {
   beginSignals();
@@ -105,6 +111,48 @@ int main() {
       assert(!(TIMSK1 & _BV(OCIE1B)));
     }
   }
+  // Exercise actual serial command dispatch and nonblocking loop, including
+  // output synchronization, steering during braking, and immediate STOP.
+  throttle.raw(rover::THROTTLE_NEUTRAL);
+  fakeMillis = 0;
+  send("gas 14");
+  send("gas -60");
+  assert(throttle.phase() == rover::Throttle::BRAKING);
+  fakeMillis = 500;
+  loop();
+  assert(gasDuty == rover::THROTTLE_NEUTRAL);
+  send("turn 50");
+  fakeMillis = 1500;
+  loop();
+  assert(gasDuty == rover::throttleDuty(-60));
+  assert(turnDuty == rover::steeringDuty(50));
+  send("gas 14");
+  send("gas -60");
+  send("stop");
+  fakeMillis += 2000;
+  loop();
+  assert(gasDuty == rover::THROTTLE_NEUTRAL);
+  assert(turnDuty == rover::STEERING_NEUTRAL);
+  send("duty gas 8.26");
+  assert(!throttle.transitioning() && gasDuty == 826);
+
+  // Run the included route through its reverse step. The handshake adds
+  // 1500 ms; all 4000 ms of the reverse movement must then be preserved.
+  fakeMillis = 10000;
+  send("run");
+  fakeMillis = 15000; loop();
+  fakeMillis = 15500; loop();
+  fakeMillis = 16500; loop();
+  fakeMillis = 18500; loop();
+  assert(sequence.index() == 4 && throttle.transitioning());
+  fakeMillis = 19000; loop();
+  assert(gasDuty == rover::THROTTLE_NEUTRAL);
+  fakeMillis = 20000; loop();
+  assert(gasDuty == rover::throttleDuty(-15));
+  fakeMillis = 23999; loop();
+  assert(sequence.index() == 4);
+  fakeMillis = 24000; loop();
+  assert(sequence.index() == 5 && gasDuty == rover::THROTTLE_NEUTRAL);
 }
 """
 

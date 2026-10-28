@@ -38,6 +38,79 @@ inline uint16_t dutyTicks(uint16_t hundredths) {
   return uint16_t((uint32_t(PERIOD_TICKS) * hundredths + 5000UL) / 10000UL);
 }
 
+// Nonblocking forward -> brake -> neutral -> reverse controller. Neutral alone
+// does not arm reverse on this ESC, so remember forward even across stop().
+class Throttle {
+ public:
+  enum Phase { DIRECT, BRAKING, NEUTRAL_HOLD };
+  Throttle(uint16_t brakeDuty, uint32_t brakeMs, uint32_t neutralMs)
+      : brakeDuty_(brakeDuty), brakeMs_(brakeMs), neutralMs_(neutralMs) {}
+
+  void request(uint16_t duty, uint32_t now) {
+    if (duty >= THROTTLE_NEUTRAL) {
+      if (duty == THROTTLE_NEUTRAL) { stop(now); return; }
+      // A forward command supersedes any queued reverse immediately.
+      phase_ = DIRECT;
+      needsBrake_ = true;
+      output_ = target_ = duty;
+    } else if (phase_ != DIRECT) {
+      target_ = duty;  // Adjust reverse strength without restarting the timer.
+    } else if (needsBrake_) {
+      target_ = duty;
+      output_ = brakeDuty_;
+      phase_ = BRAKING;
+      started_ = now;
+    } else {
+      output_ = target_ = duty;
+    }
+  }
+
+  void stop(uint32_t now) {
+    (void)now;
+    output_ = target_ = THROTTLE_NEUTRAL;
+    // Never resume a canceled reverse. An interrupted brake may not have
+    // reached the ESC, so retain needsBrake_. A completed brake's neutral
+    // interval can finish in the background with a neutral target.
+    if (phase_ == BRAKING) {
+      phase_ = DIRECT;
+    }
+  }
+
+  // Raw duty testing deliberately bypasses the automatic handshake.
+  void raw(uint16_t duty) {
+    phase_ = DIRECT;
+    output_ = target_ = duty;
+    if (duty > THROTTLE_NEUTRAL) needsBrake_ = true;
+  }
+
+  void update(uint32_t now) {
+    if (phase_ == BRAKING && uint32_t(now - started_) >= brakeMs_) {
+      output_ = THROTTLE_NEUTRAL;
+      phase_ = NEUTRAL_HOLD;
+      started_ = now;  // Hold a full neutral interval, even after a late loop.
+    } else if (phase_ == NEUTRAL_HOLD &&
+               uint32_t(now - started_) >= neutralMs_) {
+      needsBrake_ = false;
+      phase_ = DIRECT;
+      output_ = target_;
+    }
+  }
+
+  uint16_t duty() const { return output_; }
+  Phase phase() const { return phase_; }
+  bool transitioning() const { return phase_ != DIRECT; }
+
+ private:
+  uint16_t brakeDuty_;
+  uint32_t brakeMs_;
+  uint32_t neutralMs_;
+  uint32_t started_ = 0;
+  uint16_t output_ = THROTTLE_NEUTRAL;
+  uint16_t target_ = THROTTLE_NEUTRAL;
+  bool needsBrake_ = false;
+  Phase phase_ = DIRECT;
+};
+
 struct Step {
   int8_t throttle;  // -100 reverse .. 0 neutral .. +100 forward
   int8_t steering;  // -100 left .. 0 neutral .. +100 right
@@ -56,6 +129,7 @@ class Sequence {
   }
 
   void stop() { running_ = false; }
+  void restartHold(uint32_t now) { started_ = now; }
   bool running() const { return running_; }
   uint16_t index() const { return index_; }
   const Step& current() const { return steps_[index_]; }

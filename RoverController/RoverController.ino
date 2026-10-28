@@ -33,6 +33,16 @@ constexpr bool HARDWARE_PWM = (THROTTLE_PIN == 9 && STEERING_PIN == 10) ||
 constexpr bool AUTO_RUN_ON_BOOT = false;
 constexpr uint32_t STARTUP_NEUTRAL_MS = 5000;
 
+// Automatic forward-to-reverse handshake (based on the working gas -60 test).
+// These holds are added BEFORE a reverse route step's requested duration.
+constexpr int BRAKE_PERCENT = -60;
+constexpr uint32_t BRAKE_HOLD_MS = 500;
+constexpr uint32_t REVERSE_NEUTRAL_MS = 1000;
+static_assert(BRAKE_PERCENT >= -100 && BRAKE_PERCENT < 0,
+              "Brake command must be between -100 and -1");
+static_assert(BRAKE_HOLD_MS >= 32 && REVERSE_NEUTRAL_MS >= 32,
+              "Brake and neutral holds must span at least two PWM frames");
+
 // Edit this table and upload to change the standalone route.
 // {throttle %, steering %, hold time in milliseconds}
 // Each row replaces both settings. Repeat a setting to keep it active.
@@ -46,6 +56,8 @@ const rover::Step PROGRAM[] = {
 };
 
 rover::Sequence sequence(PROGRAM, sizeof(PROGRAM) / sizeof(PROGRAM[0]));
+rover::Throttle throttle(rover::throttleDuty(BRAKE_PERCENT),
+                         BRAKE_HOLD_MS, REVERSE_NEUTRAL_MS);
 uint16_t gasDuty = rover::THROTTLE_NEUTRAL;
 uint16_t turnDuty = rover::STEERING_NEUTRAL;
 bool autoPending = AUTO_RUN_ON_BOOT;
@@ -179,13 +191,15 @@ void cancelProgram() {
 }
 
 void neutral() {
-  gasDuty = rover::THROTTLE_NEUTRAL;
+  throttle.stop(millis());
+  gasDuty = throttle.duty();
   turnDuty = rover::STEERING_NEUTRAL;
   writeOutputs();
 }
 
 void applyStep() {
-  gasDuty = rover::throttleDuty(sequence.current().throttle);
+  throttle.request(rover::throttleDuty(sequence.current().throttle), millis());
+  gasDuty = throttle.duty();
   turnDuty = rover::steeringDuty(sequence.current().steering);
   writeOutputs();
 }
@@ -210,6 +224,10 @@ void status() {
   Serial.print(F(" Turn=")); printDuty(turnDuty);
   Serial.print(F(" Pins(gas/turn)="));
   Serial.print(THROTTLE_PIN); Serial.print('/'); Serial.print(STEERING_PIN);
+  Serial.print(F(" Throttle="));
+  if (throttle.phase() == rover::Throttle::BRAKING) Serial.print(F("braking"));
+  else if (throttle.phase() == rover::Throttle::NEUTRAL_HOLD) Serial.print(F("neutral hold"));
+  else Serial.print(F("direct"));
   Serial.print(F(" Mode="));
   if (autoPending) Serial.println(F("startup neutral"));
   else if (sequence.running()) {
@@ -224,6 +242,7 @@ void help() {
   Serial.println(F("run | stop | status | help"));
   Serial.println(F("Manual commands cancel the program, retaining the other channel."));
   Serial.println(F("STOP sets BOTH channels neutral. Manual settings persist until changed/reset."));
+  Serial.println(F("gas reverse after forward adds brake + neutral automatically; raw duty bypasses it."));
 }
 
 bool number(const char* token, float& value) {
@@ -252,7 +271,10 @@ void command(char* line) {
   } else if ((!strcmp(cmd, "gas") || !strcmp(cmd, "turn")) && !b &&
              number(a, value) && value >= -100 && value <= 100 && value == int(value)) {
     cancelProgram();
-    if (!strcmp(cmd, "gas")) gasDuty = rover::throttleDuty(int(value));
+    if (!strcmp(cmd, "gas")) {
+      throttle.request(rover::throttleDuty(int(value)), millis());
+      gasDuty = throttle.duty();
+    }
     else turnDuty = rover::steeringDuty(int(value));
     writeOutputs();
   } else if (!strcmp(cmd, "duty") && a && !extra && number(b, value) &&
@@ -260,7 +282,10 @@ void command(char* line) {
              (!strcmp(a, "gas") || !strcmp(a, "turn"))) {
     cancelProgram();
     const uint16_t duty = uint16_t(value * 100.0f + 0.5f);
-    if (!strcmp(a, "gas")) gasDuty = duty;
+    if (!strcmp(a, "gas")) {
+      throttle.raw(duty);
+      gasDuty = throttle.duty();
+    }
     else turnDuty = duty;
     writeOutputs();
   } else {
@@ -301,6 +326,16 @@ void loop() {
   readSerial();
   const uint32_t now = millis();
   if (autoPending && uint32_t(now - bootTime) >= STARTUP_NEUTRAL_MS) startProgram();
+  const bool wasTransitioning = throttle.transitioning();
+  throttle.update(now);
+  if (gasDuty != throttle.duty()) {
+    gasDuty = throttle.duty();
+    writeOutputs();
+  }
+  // Start the reverse step's movement duration only once the handshake ends.
+  if (sequence.running() && (wasTransitioning || throttle.transitioning())) {
+    sequence.restartHold(now);
+  }
   if (sequence.update(now)) {
     if (sequence.running()) applyStep();
     else { neutral(); Serial.println(F("Program complete; neutral.")); }

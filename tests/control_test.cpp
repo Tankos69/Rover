@@ -47,5 +47,62 @@ int main() {
   Sequence empty(steps, 0);
   empty.start(0);
   assert(!empty.running() && !empty.update(1000));
+  Throttle t(throttleDuty(-60), 500, 1000);
+  t.request(throttleDuty(-60), 0);  // Cold start reverse has no forward history.
+  assert(!t.transitioning() && t.duty() == throttleDuty(-60));
+  t.request(throttleDuty(14), 10);
+  t.request(throttleDuty(-60), 20);
+  assert(t.phase() == Throttle::BRAKING);
+  t.update(519);
+  assert(t.phase() == Throttle::BRAKING);
+  t.update(520);
+  assert(t.phase() == Throttle::NEUTRAL_HOLD && t.duty() == THROTTLE_NEUTRAL);
+  t.request(throttleDuty(-30), 600);  // Change target without restarting hold.
+  t.update(1519);
+  assert(t.duty() == THROTTLE_NEUTRAL);
+  t.update(1520);
+  assert(!t.transitioning() && t.duty() == throttleDuty(-30));
+  t.request(throttleDuty(-70), 1600);
+  assert(!t.transitioning() && t.duty() == throttleDuty(-70));
+
+  t.request(throttleDuty(14), 2000);
+  t.stop(2100);
+  t.request(throttleDuty(-60), 2200);  // Neutral alone does not arm reverse.
+  assert(t.phase() == Throttle::BRAKING);
+  t.stop(2300);  // Cancel queued reverse during braking.
+  assert(t.duty() == THROTTLE_NEUTRAL);
+  t.update(3300);
+  assert(!t.transitioning() && t.duty() == THROTTLE_NEUTRAL);
+  t.request(throttleDuty(-60), 3400);
+  assert(t.phase() == Throttle::BRAKING);  // Interrupted brake must be retried.
+
+  t.request(throttleDuty(14), 4000);
+  t.request(throttleDuty(-60), 4100);
+  t.update(4600);
+  t.stop(4700);  // Cancel queued reverse during neutral hold too.
+  t.update(5600);
+  assert(!t.transitioning() && t.duty() == THROTTLE_NEUTRAL);
+
+  t.request(throttleDuty(14), 6000);
+  t.request(throttleDuty(-60), 6100);
+  t.request(throttleDuty(30), 6200);  // New forward overrides queued reverse.
+  t.update(9000);
+  assert(!t.transitioning() && t.duty() == throttleDuty(30));
+  t.request(throttleDuty(-60), UINT32_MAX - 100);
+  t.update(399);  // Wrap-safe brake duration.
+  assert(t.phase() == Throttle::NEUTRAL_HOLD);
+  t.update(1399);
+  assert(!t.transitioning() && t.duty() == throttleDuty(-60));
+  t.request(throttleDuty(14), 1500);
+  t.request(throttleDuty(-60), 1600);
+  t.update(10000);  // A delayed loop must still output a full neutral hold.
+  assert(t.phase() == Throttle::NEUTRAL_HOLD);
+  t.update(10999);
+  assert(t.duty() == THROTTLE_NEUTRAL);
+  t.update(11000);
+  assert(t.duty() == throttleDuty(-60));
+  t.raw(850);
+  assert(!t.transitioning() && t.duty() == 850);
+  puts("PASS: reverse handshake, cancellation, target changes, raw bypass, clock rollover");
   puts("PASS: calibration, monotonic mapping, PWM conversion, sequence timing, stop/restart, clock rollover");
 }

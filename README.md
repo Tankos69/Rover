@@ -71,11 +71,46 @@ ending. Commands are case-insensitive.
 | `status` | Show duty cycles and operating mode |
 | `help` | Show commands |
 
+### Automatic braking before reverse
+
+After `gas 14`, sending `gas -60` now automatically sends:
+
+1. A brake request at **-60%** for **500 ms**.
+2. Neutral throttle for **1000 ms**.
+3. Your requested reverse percentage, held until changed.
+
+This also works for other reverse percentages and for programmed routes.
+The code remembers forward driving across a neutral/`stop` command, because
+neutral alone did not arm reverse in the observed rover controller.
+After the handshake, changing reverse speed does not repeat it; commanding
+forward makes the next reverse request require braking again. Reverse from
+power-up, without prior forward driving, is sent directly. Reverse-to-forward
+commands are also applied directly.
+
+Tune `BRAKE_PERCENT`, `BRAKE_HOLD_MS`, and `REVERSE_NEUTRAL_MS` near the top of
+the sketch if your controller needs different timing. The defaults use the
+working -60% brake command from the manual test. Check on the actual rover;
+these are timed commands without wheel-speed or controller-state feedback.
+Small reverse requests can still fall within the motor controller's deadband.
+
+The transition does not block serial input or signal generation. Steering
+remains controllable. `stop` or `gas 0` immediately requests neutral and cancels
+the queued reverse. A neutral arming interval already in progress finishes
+without movement; an interrupted brake is retried on the next reverse request.
+A forward request cancels the transition. Another negative `gas`
+request updates the queued speed without restarting the hold times. `status`
+reports `braking`, `neutral hold`, or `direct` along with the current duty.
+
+**Raw `duty gas ...` commands bypass automatic braking**, cancel any queued
+reverse, and apply the exact duty requested, for signal testing. Use `gas`
+commands for automatic brake/neutral handling.
+
 `gas` and `turn` accept integers from -100 to 100. `duty` accepts 0–100%
 (rounded to 0.01%). Use raw duty testing carefully: values beyond the measured
 endpoints may cause unexpected behavior. A valid manual movement/duty command
 cancels the sequence and pending autostart, changes the selected channel, and
-retains the other channel's current setting. Invalid commands leave outputs
+retains the other channel's command (including any pending throttle transition).
+Invalid commands leave outputs
 unchanged. There is no USB-disconnect timeout.
 
 Percent movement commands interpolate linearly between neutral and the measured
@@ -102,7 +137,12 @@ Edit `PROGRAM` near the top of the sketch. Every row contains:
 Both percentages must be integers from -100 to 100. Durations must be positive
 32-bit millisecond values (use reasonable route durations under 49 days).
 Each row sets **both channels** and holds them for its duration; repeat a value
-to maintain it. The included route implements the requested example:
+to maintain it. When a reverse row needs automatic braking, the brake and
+neutral holds are added **before** that row's duration starts. For example, a
+4000 ms reverse row still gets 4000 ms of reverse command after the 1500 ms
+handshake. You do not need to add a separate brake row.
+
+The included route implements the requested example:
 
 ```cpp
 const rover::Step PROGRAM[] = {
@@ -166,7 +206,8 @@ python3 tests/output_test.py
 ```
 
 The output tests use simulated registers to exercise pin routing, frame updates,
-coincident/late falling edges, 0%/100% duty, and rejection of invalid pins.
+coincident/late falling edges, 0%/100% duty, rejection of invalid pins, serial
+reverse transitions, cancellation, and full route duration after braking.
 They require Python 3 and g++.
 
 These checks cannot validate electrical levels, physical PWM waveforms, motor
