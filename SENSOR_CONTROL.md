@@ -176,7 +176,7 @@ turn overshoot and physical Y-turn geometry require testing on the rover.
 - `sample-gap`: over 50 ms between samples after calibration. This can be caused
   by a software polling delay as well as sensor/bus problems; check `gapMs`.
 - `saturated`: an accelerometer or gyro axis approached the configured range.
-- `cal-moving`: acceleration magnitude or gyro rate failed the stationary check.
+- `cal-moving`: acceleration magnitude failed the stationary gravity check.
 - `cal-gyro-noise`, `cal-accel-noise`: calibration sample variance was excessive.
 
 With motors inactive, keep the rover still, send `calibrate`, wait three seconds,
@@ -189,9 +189,32 @@ For `cal-moving`, `status` also prints a second line with the **failed sample's*
 acceleration XYZ, acceleration magnitude (`norm[g]`) and gyro XYZ. These values
 stay frozen until a new initialization/calibration, so a later `status` reports
 what triggered the error, not a reading taken after the movement ended.
-The check rejects acceleration magnitude outside 0.85..1.15 g or a gyro axis
-outside -5..5 degrees/second **before bias subtraction**. This is a heuristic,
-not proof of physical motion: a large static sensor offset, bad readings or
-vibration can also trigger it. A stationary, tilted sensor should still measure
+The check rejects acceleration magnitude outside 0.85..1.15 g. Gyro stability
+is checked over all 200 samples (per-axis sample variance limit 0.1 (deg/s)^2).
+Stable gyro offsets are averaged and subtracted; there is no longer a 5 deg/s
+absolute-rate cutoff before bias estimation. The previous cutoff incorrectly
+rejected a stationary sensor reporting about 13.37 deg/s on X.
+These checks are heuristics, not proof of physical stillness. A stationary, tilted sensor should still measure
 approximately 1 g total; no individual accelerometer axis has to equal 1 g.
 Do not widen the thresholds without first examining the failing values.
+
+
+## Stable gyro offsets and mounting direction
+
+`status` prints the estimated gyro bias as `bias[dps]=X,Y,Z`. A stationary gyro
+can have a nonzero raw reading; calibration must estimate that bias rather than
+require its uncorrected value to be close to zero. The running mean and variance
+use Welford's algorithm, which avoids subtracting large, nearly equal values.
+Variable readings are still rejected. A large offset warrants checking drift
+and repeatability; successful calibration alone does not prove sensor accuracy.
+
+**Keep the rover physically still for the entire calibration.** Constant rotation
+cannot be distinguished from bias using these samples and would be incorrectly
+subtracted. Keep the motors inactive. Do not calibrate while holding, carrying,
+or rotating the rover, and verify yaw stays approximately steady afterward.
+
+A sample near `Accel=-0.148,0.008,-0.964 g` has magnitude about 0.975 g, which
+passes the gravity check, but shows the sensor Z axis pointing down. This
+controller assumes Z **up**, X forward and Y left. Remount accordingly before
+using angle/Y-turn commands; bias calibration does not correct mounting axes.
+Confirm a rightward hand rotation increases `yaw(right+)` before powered turns.

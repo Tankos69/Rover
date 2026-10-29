@@ -36,6 +36,7 @@ class Mpu6500 {
     accelSum_=accelSquares_=0;
     yaw=speed=0; last_=lastSample_=millis();
   }
+  float gyroBias(uint8_t axis) const { return bias_[axis]; }
   bool fresh(uint32_t now) const { return ready && !fault && uint32_t(now-lastSample_)<100; }
   void update(uint32_t now) {
     if (fault || uint32_t(now-last_)<10) return;
@@ -61,15 +62,22 @@ class Mpu6500 {
     float accPitch=atan2f(-accel[0],sqrtf(accel[1]*accel[1]+accel[2]*accel[2]));
     if (calibrating) {
       float norm=sqrtf(accel[0]*accel[0]+accel[1]*accel[1]+accel[2]*accel[2]);
-      if (fabsf(norm-1)>.15f || fabsf(gyro[0])>5 || fabsf(gyro[1])>5 || fabsf(gyro[2])>5) { fail(CAL_MOVING); return; }
-      for (uint8_t i=0;i<3;++i) { sum_[i]+=gyro[i]; squares_[i]+=gyro[i]*gyro[i]; }
+      if (fabsf(norm-1)>.15f) { fail(CAL_MOVING); return; }
+      // Welford mean/variance: a stable nonzero rate can be stationary bias.
+      // Physical stillness is a prerequisite; constant rotation is unobservable
+      // as motion from gyro variance alone and would be calibrated out.
+      for (uint8_t i=0;i<3;++i) {
+        float delta=gyro[i]-sum_[i];
+        sum_[i]+=delta/(count_+1);
+        squares_[i]+=delta*(gyro[i]-sum_[i]);
+      }
       accelSum_+=norm; accelSquares_+=norm*norm;
       if (++count_==200) {
         for (uint8_t i=0;i<3;++i) {
-          bias_[i]=sum_[i]/200;
-          if (squares_[i]/200-bias_[i]*bias_[i]>.1f) { fail(CAL_GYRO_NOISE); return; }
+          if (squares_[i]/199>.1f) { fail(CAL_GYRO_NOISE); return; }
         }
         if (accelSquares_/200-powf(accelSum_/200,2)>.0025f) { fail(CAL_ACCEL_NOISE); return; }
+        for (uint8_t i=0;i<3;++i) bias_[i]=sum_[i];
         pitch=accPitch; ready=true; calibrating=false; yaw=speed=0;
       }
       return;

@@ -216,19 +216,36 @@ int main() {
   assert(imu.error==Mpu6500::NO_DEVICE);
   Wire.present=true;
   imu.begin();
-  Wire.bytes[12]=0x10; Wire.bytes[13]=0; // Movement during calibration.
-  fakeMillis+=10; imu.update(fakeMillis);
-  assert(imu.error==Mpu6500::CAL_MOVING);
-  assert(imu.gyro[2]>5 && imu.accel[2]==1);
-  Wire.bytes[12]=0; // Live data changes must not overwrite the failed sample.
-  fakeMillis+=10; imu.update(fakeMillis);
-  assert(imu.gyro[2]>5);
-  send("status");
+  // Stable measured offsets must calibrate even when they exceed 5 dps.
+  const float offsets[3]={13.37f,2.39f,-2.20f};
+  for (int axis=0;axis<3;++axis) {
+    int16_t raw=int16_t(offsets[axis]*131);
+    Wire.bytes[8+2*axis]=uint16_t(raw)>>8;
+    Wire.bytes[9+2*axis]=uint16_t(raw)&255;
+  }
+  for (int i=0;i<200;++i) {fakeMillis+=10; imu.update(fakeMillis);}
+  assert(imu.ready && !imu.fault);
+  for (int axis=0;axis<3;++axis) assert(fabs(imu.gyroBias(axis)-offsets[axis])<.01f);
+  for (int i=0;i<100;++i) {fakeMillis+=10; imu.update(fakeMillis);}
+  assert(fabs(imu.yaw)<.001f); // Stable Z bias removed for a full second.
   imu.begin();
+  // Variable angular rate is still rejected, even around a large offset.
+  for (int i=0;i<200;++i) {
+    int16_t raw=int16_t((13.37f+(i%2 ? 1 : -1))*131);
+    Wire.bytes[8]=uint16_t(raw)>>8; Wire.bytes[9]=uint16_t(raw)&255;
+    fakeMillis+=10; imu.update(fakeMillis);
+  }
+  assert(imu.error==Mpu6500::CAL_GYRO_NOISE);
+  imu.begin();
+  for (int axis=0;axis<3;++axis) Wire.bytes[8+2*axis]=Wire.bytes[9+2*axis]=0;
+
   Wire.bytes[4]=Wire.bytes[5]=Wire.bytes[13]=0; // No gravity: accel check fails.
   fakeMillis+=10; imu.update(fakeMillis);
   assert(imu.error==Mpu6500::CAL_MOVING);
   assert(imu.accel[2]==0 && imu.gyro[2]==0);
+  Wire.bytes[4]=0x40;
+  fakeMillis+=10; imu.update(fakeMillis);
+  assert(imu.accel[2]==0); // Fault preserves the rejected sample.
   send("status");
 
 }

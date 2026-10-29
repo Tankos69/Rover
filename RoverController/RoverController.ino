@@ -265,6 +265,11 @@ void status() {
     case Mpu6500::CAL_GYRO_NOISE: Serial.print(F("cal-gyro-noise")); break;
     case Mpu6500::CAL_ACCEL_NOISE: Serial.print(F("cal-accel-noise")); break;
   }
+  Serial.print(F(" bias[dps]="));
+  for (uint8_t i=0;i<3;++i) {
+    if (i) Serial.print(',');
+    Serial.print(imu.gyroBias(i),3);
+  }
   Serial.print(F(" gapMs=")); Serial.print(imu.sampleGapMs);
   Serial.print(F(" yaw(right+)=")); Serial.print(imu.yaw);
   Serial.print(F(" estimated m/s=")); Serial.print(imu.speed);
@@ -298,7 +303,7 @@ void status() {
       Serial.print(imu.gyro[i],3);
     }
     Serial.println();
-    Serial.println(F("Limits: norm 0.85..1.15 g; each gyro axis -5..5 dps (before bias correction)."));
+    Serial.println(F("Limit: norm 0.85..1.15 g. Gyro stability is checked over 200 samples."));
   }
 }
 
