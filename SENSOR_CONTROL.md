@@ -184,3 +184,14 @@ then send `status`. If ready, send `run` and capture `status` again after a stop
 An error already present before driving points to startup/calibration or idle
 sampling; one appearing during driving needs investigation of motor interference,
 vibration and sampling timing. Do not bypass readiness checks to force a turn.
+
+For `cal-moving`, `status` also prints a second line with the **failed sample's**
+acceleration XYZ, acceleration magnitude (`norm[g]`) and gyro XYZ. These values
+stay frozen until a new initialization/calibration, so a later `status` reports
+what triggered the error, not a reading taken after the movement ended.
+The check rejects acceleration magnitude outside 0.85..1.15 g or a gyro axis
+outside -5..5 degrees/second **before bias subtraction**. This is a heuristic,
+not proof of physical motion: a large static sensor offset, bad readings or
+vibration can also trigger it. A stationary, tilted sensor should still measure
+approximately 1 g total; no individual accelerometer axis has to equal 1 g.
+Do not widen the thresholds without first examining the failing values.

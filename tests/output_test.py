@@ -40,6 +40,8 @@ struct FakeSerial {
   int available() { return 0; }
   int read() { return -1; }
   template<class T> void print(T) {}
+  template<class T> void print(T, int) {}
+  void println() {}
   template<class T> void println(T) {}
 };
 static FakeSerial Serial;
@@ -217,6 +219,17 @@ int main() {
   Wire.bytes[12]=0x10; Wire.bytes[13]=0; // Movement during calibration.
   fakeMillis+=10; imu.update(fakeMillis);
   assert(imu.error==Mpu6500::CAL_MOVING);
+  assert(imu.gyro[2]>5 && imu.accel[2]==1);
+  Wire.bytes[12]=0; // Live data changes must not overwrite the failed sample.
+  fakeMillis+=10; imu.update(fakeMillis);
+  assert(imu.gyro[2]>5);
+  send("status");
+  imu.begin();
+  Wire.bytes[4]=Wire.bytes[5]=Wire.bytes[13]=0; // No gravity: accel check fails.
+  fakeMillis+=10; imu.update(fakeMillis);
+  assert(imu.error==Mpu6500::CAL_MOVING);
+  assert(imu.accel[2]==0 && imu.gyro[2]==0);
+  send("status");
 
 }
 """

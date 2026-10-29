@@ -282,6 +282,24 @@ void status() {
     Serial.print(F("program step ")); Serial.println(sequence.index() + 1);
   } else if (motion.active) Serial.println(F("sensor motion"));
   else Serial.println(F("manual/idle"));
+  if (imu.error == Mpu6500::CAL_MOVING) {
+    // The driver stops sampling on a fault: these are the values that failed,
+    // not a new reading taken after the rover has stopped moving.
+    Serial.print(F("Calibration sample: accel[g]="));
+    for (uint8_t i=0;i<3;++i) {
+      if (i) Serial.print(',');
+      Serial.print(imu.accel[i],3);
+    }
+    float norm=sqrtf(imu.accel[0]*imu.accel[0]+imu.accel[1]*imu.accel[1]+imu.accel[2]*imu.accel[2]);
+    Serial.print(F(" norm[g]=")); Serial.print(norm,3);
+    Serial.print(F(" gyro[dps]="));
+    for (uint8_t i=0;i<3;++i) {
+      if (i) Serial.print(',');
+      Serial.print(imu.gyro[i],3);
+    }
+    Serial.println();
+    Serial.println(F("Limits: norm 0.85..1.15 g; each gyro axis -5..5 dps (before bias correction)."));
+  }
 }
 
 void help() {
