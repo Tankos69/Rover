@@ -6,6 +6,14 @@ It uses your measured frequency exactly as specified, rather than the more
 usual 50 Hz servo signal. Confirm the frequency and polarity on an oscilloscope
 before connecting the rover. The period is about **15.959 ms**.
 
+## MPU-6500 integration
+
+See [sensor-controlled turns, experimental speed control and Y turns](SENSOR_CONTROL.md)
+for wiring, mounting, calibration, route examples and accuracy limits. Sensor
+support is enabled by default and reserves A4/A5; old timed rows still work.
+Speed estimation/control is experimental and disabled by default. A gyro-based
+180-degree Y turn does not guarantee returning to the same position.
+
 ## Wiring and first test
 
 1. Disconnect the receiver's two signal outputs from the motor/steering
@@ -40,7 +48,8 @@ Edit these definitions near the top of `RoverController.ino`, then upload again:
 
 For example, use `THROTTLE_PIN 4` and `STEERING_PIN 7` to output on D4 and D7.
 You can select any **two different pins from D2–D13 or A0–A5**; write an analog
-pin as `A0`, for example. D0/D1 are reserved for serial control. Invalid or
+pin as `A0`, for example. With sensor support enabled, **A4/A5 are reserved**
+for I2C and cannot be selected as outputs. D0/D1 are reserved for serial control. Invalid or
 duplicate pins cause a compile error. The pins do not need to be marked PWM.
 Pin assignments are compiled into the program, not changed over serial.
 

@@ -7,6 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "rover_control.h"
+#include "mpu6500.h"
+
+#ifndef ROVER_ENABLE_IMU
+#define ROVER_ENABLE_IMU 1
+#endif
+// Experimental IMU-only speed control: drift-prone; use wheel encoders for accuracy.
+constexpr bool ENABLE_EXPERIMENTAL_SPEED = false;
 
 #if !defined(__AVR_ATmega328P__) || F_CPU != 16000000UL
 #error "Select Arduino Uno (ATmega328P, 16 MHz)."
@@ -26,6 +33,8 @@ static_assert(THROTTLE_PIN >= 2 && THROTTLE_PIN <= A5,
 static_assert(STEERING_PIN >= 2 && STEERING_PIN <= A5,
               "Steering pin must be D2..D13 or A0..A5");
 static_assert(THROTTLE_PIN != STEERING_PIN, "Output pins must be different");
+static_assert(!ROVER_ENABLE_IMU || (THROTTLE_PIN < A4 && STEERING_PIN < A4),
+              "IMU uses A4/A5 for I2C; choose other output pins");
 constexpr bool HARDWARE_PWM = (THROTTLE_PIN == 9 && STEERING_PIN == 10) ||
                               (THROTTLE_PIN == 10 && STEERING_PIN == 9);
 
@@ -46,6 +55,8 @@ static_assert(BRAKE_HOLD_MS >= 32 && REVERSE_NEUTRAL_MS >= 32,
 // Edit this table and upload to change the standalone route.
 // {throttle %, steering %, hold time in milliseconds}
 // Each row replaces both settings. Repeat a setting to keep it active.
+// You may also insert sensor steps, e.g. rover::Turn(15, -100, 30),
+// rover::YTurn(15, -100, -60), or experimental rover::Cruise(0.5, 40, 3000).
 const rover::Step PROGRAM[] = {
   { 15,  0, 5000},  // Forward 15% for 5 seconds
   { 15, 50,  500},  // Keep driving, turn right 50% for 0.5 seconds
@@ -55,6 +66,8 @@ const rover::Step PROGRAM[] = {
   {  0,  0, 1000},  // Stop; completion also holds neutral indefinitely
 };
 
+Mpu6500 imu;
+rover::MotionControl motion;
 rover::Sequence sequence(PROGRAM, sizeof(PROGRAM) / sizeof(PROGRAM[0]));
 rover::Throttle throttle(rover::throttleDuty(BRAKE_PERCENT),
                          BRAKE_HOLD_MS, REVERSE_NEUTRAL_MS);
@@ -188,6 +201,7 @@ void beginSignals() {
 void cancelProgram() {
   autoPending = false;
   sequence.stop();
+  motion.stop();
 }
 
 void neutral() {
@@ -197,11 +211,24 @@ void neutral() {
   writeOutputs();
 }
 
-void applyStep() {
-  throttle.request(rover::throttleDuty(sequence.current().throttle), millis());
+void movement(int gas, int steering) {
+  throttle.request(rover::throttleDuty(gas), millis());
   gasDuty = throttle.duty();
-  turnDuty = rover::steeringDuty(sequence.current().steering);
+  turnDuty = rover::steeringDuty(steering);
   writeOutputs();
+}
+
+void applyStep() {
+  const rover::Step& step = sequence.current();
+  if (step.motion.kind != rover::TIMED) {
+    if (!motion.start(step.motion, millis(), imu.yaw,
+                      ROVER_ENABLE_IMU && imu.fresh(millis()), ENABLE_EXPERIMENTAL_SPEED)) {
+      cancelProgram(); neutral();
+      Serial.println(F("Motion refused: IMU not ready, speed disabled, or invalid parameters."));
+      return;
+    }
+    movement(motion.gas, motion.steering);
+  } else movement(step.throttle, step.steering);
 }
 
 void startProgram() {
@@ -220,7 +247,12 @@ void printDuty(uint16_t duty) {
 }
 
 void status() {
-  Serial.print(F("Gas=")); printDuty(gasDuty);
+  Serial.print(F("IMU ready=")); Serial.print(imu.ready);
+  Serial.print(F(" calibrating=")); Serial.print(imu.calibrating);
+  Serial.print(F(" fault=")); Serial.print(imu.fault);
+  Serial.print(F(" yaw(right+)=")); Serial.print(imu.yaw);
+  Serial.print(F(" estimated m/s=")); Serial.print(imu.speed);
+  Serial.print(F(" Gas=")); printDuty(gasDuty);
   Serial.print(F(" Turn=")); printDuty(turnDuty);
   Serial.print(F(" Pins(gas/turn)="));
   Serial.print(THROTTLE_PIN); Serial.print('/'); Serial.print(STEERING_PIN);
@@ -232,17 +264,16 @@ void status() {
   if (autoPending) Serial.println(F("startup neutral"));
   else if (sequence.running()) {
     Serial.print(F("program step ")); Serial.println(sequence.index() + 1);
-  } else Serial.println(F("manual/idle"));
+  } else if (motion.active) Serial.println(F("sensor motion"));
+  else Serial.println(F("manual/idle"));
 }
 
 void help() {
-  Serial.println(F("Commands (115200 baud, newline):"));
-  Serial.println(F("gas -100..100 | turn -100..100 (positive=forward/right)"));
-  Serial.println(F("duty gas 0..100 | duty turn 0..100 (raw duty percent)"));
-  Serial.println(F("run | stop | status | help"));
-  Serial.println(F("Manual commands cancel the program, retaining the other channel."));
-  Serial.println(F("STOP sets BOTH channels neutral. Manual settings persist until changed/reset."));
-  Serial.println(F("gas reverse after forward adds brake + neutral automatically; raw duty bypasses it."));
+  Serial.println(F("115200 baud, newline. gas N | turn N (-100..100); duty gas/turn P (0..100)"));
+  Serial.println(F("run | stop | status | help | calibrate"));
+  Serial.println(F("angle GAS STEER DEG | yturn GAS STEER"));
+  Serial.println(F("speed GAS M/S | cruise M/S MAXGAS SECONDS (opt-in)"));
+  Serial.println(F("STOP cancels. gas adds brake/neutral; duty bypasses it."));
 }
 
 bool number(const char* token, float& value) {
@@ -259,8 +290,42 @@ void command(char* line) {
   char* a = strtok(NULL, " \t");
   char* b = strtok(NULL, " \t");
   char* extra = strtok(NULL, " \t");
-  float value;
-  if (!a && !strcmp(cmd, "stop")) {
+  char* fourth = strtok(NULL, " \t");
+  float value, v2, v3;
+  if (imu.calibrating && strcmp(cmd,"stop") && strcmp(cmd,"status") &&
+      strcmp(cmd,"help") && strcmp(cmd,"calibrate")) {
+    Serial.println(F("Wait for calibration with rover stationary.")); return;
+  }
+  if ((!strcmp(cmd,"angle") || !strcmp(cmd,"speed") ||
+       !strcmp(cmd,"cruise") || !strcmp(cmd,"yturn")) && !fourth &&
+      number(a,value) && number(b,v2) &&
+      ((!strcmp(cmd,"angle") || !strcmp(cmd,"cruise")) ? number(extra,v3) : !extra)) {
+    rover::Motion action={rover::TIMED,0,0,0,0};
+    bool valid=false;
+    if (!strcmp(cmd,"angle") && value!=0 && v2!=0 && value>=-100 && value<=100 && value==int(value) &&
+        v2>=-100 && v2<=100 && v2==int(v2) && v3>0 && v3<=360) {
+      action=rover::Turn(int(value),int(v2),v3); valid=true;
+    } else if (!strcmp(cmd,"yturn") && v2!=0 && value>0 && value<=100 && value==int(value) &&
+               v2>=-100 && v2<=100 && v2==int(v2)) {
+      action=rover::YTurn(int(value),int(v2)); valid=true;
+    } else if (!strcmp(cmd,"speed") && v2>0 && v2<=3 && value>0 && value<=100 && value==int(value)) {
+      action=rover::Accelerate(int(value),v2); valid=true;
+    } else if (!strcmp(cmd,"cruise") && value>0 && value<=3 && v2>0 && v2<=100 && v2==int(v2) && v3>0 && v3<=60) {
+      action=rover::Cruise(value,int(v2),uint32_t(v3*1000)); valid=true;
+    }
+    if (!valid || !ROVER_ENABLE_IMU || !imu.fresh(millis()) ||
+        ((action.kind==rover::ACCELERATE || action.kind==rover::CRUISE) && !ENABLE_EXPERIMENTAL_SPEED)) {
+      Serial.println(F("Invalid motion, IMU unavailable, or experimental speed disabled.")); return;
+    }
+    cancelProgram();
+    if (motion.start(action,millis(),imu.yaw,true,ENABLE_EXPERIMENTAL_SPEED))
+      movement(motion.gas,motion.steering);
+    else { neutral(); Serial.println(F("Motion parameters refused.")); }
+  } else if (!a && !strcmp(cmd,"calibrate")) {
+    cancelProgram(); neutral();
+    if (ROVER_ENABLE_IMU) imu.begin();
+    Serial.println(F("Keep rover stationary for IMU calibration (about 2 seconds)."));
+  } else if (!a && !strcmp(cmd, "stop")) {
     cancelProgram(); neutral();
   } else if (!a && !strcmp(cmd, "run")) {
     startProgram();
@@ -318,6 +383,8 @@ void setup() {
   beginSignals();  // Neutral outputs before serial initialization.
   bootTime = millis();
   Serial.begin(115200);
+  if (ROVER_ENABLE_IMU) imu.begin();
+  Serial.println(F("Keep rover stationary during IMU calibration; status reports readiness."));
   help();
   status();
 }
@@ -325,7 +392,8 @@ void setup() {
 void loop() {
   readSerial();
   const uint32_t now = millis();
-  if (autoPending && uint32_t(now - bootTime) >= STARTUP_NEUTRAL_MS) startProgram();
+  if (ROVER_ENABLE_IMU) imu.update(now);
+  if (autoPending && !imu.calibrating && uint32_t(now - bootTime) >= STARTUP_NEUTRAL_MS) startProgram();
   const bool wasTransitioning = throttle.transitioning();
   throttle.update(now);
   if (gasDuty != throttle.duty()) {
@@ -336,7 +404,14 @@ void loop() {
   if (sequence.running() && (wasTransitioning || throttle.transitioning())) {
     sequence.restartHold(now);
   }
-  if (sequence.update(now)) {
+  if (motion.update(now, imu.yaw, imu.speed, imu.fresh(now), throttle.transitioning())) {
+    if (motion.active) movement(motion.gas,motion.steering);
+    else if (motion.failed) {
+      cancelProgram(); neutral();
+      Serial.println(F("Motion stopped: sensor stale/fault or timeout."));
+    } else if (!sequence.running()) neutral();
+  }
+  if (!motion.active && sequence.update(now)) {
     if (sequence.running()) applyStep();
     else { neutral(); Serial.println(F("Program complete; neutral.")); }
   }

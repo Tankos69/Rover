@@ -2,6 +2,7 @@
 #define ROVER_CONTROL_H
 
 #include <stdint.h>
+#include "motion.h"
 
 namespace rover {
 // Duty cycles in hundredths of one percent: 946 means 9.46%.
@@ -115,6 +116,11 @@ struct Step {
   int8_t throttle;  // -100 reverse .. 0 neutral .. +100 forward
   int8_t steering;  // -100 left .. 0 neutral .. +100 right
   uint32_t durationMs;
+  Motion motion;
+  Step(int gas, int turn, uint32_t ms)
+      : throttle(gas), steering(turn), durationMs(ms), motion{TIMED,0,0,0,0} {}
+  Step(Motion action)
+      : throttle(action.gas), steering(action.steering), durationMs(0), motion(action) {}
 };
 
 // Each step sets BOTH channels and holds them for durationMs.

@@ -12,6 +12,7 @@ ARDUINO = r"""
 #pragma once
 #include <stdint.h>
 #define A0 14
+#define A4 18
 #define A5 19
 #define OUTPUT 1
 #define LOW 0
@@ -21,6 +22,7 @@ static volatile uint8_t ports[3] = {};
 static uint8_t digitalPinToPort(uint8_t p) { return p < 8 ? 0 : p < 14 ? 1 : 2; }
 static uint8_t digitalPinToBitMask(uint8_t p) { return _BV(p < 8 ? p : p < 14 ? p - 8 : p - 14); }
 static volatile uint8_t* portOutputRegister(uint8_t p) { return &ports[p]; }
+static void delay(unsigned long) {}
 static void pinMode(uint8_t, uint8_t) {}
 static void digitalWrite(uint8_t p, uint8_t v) {
   if (v) ports[digitalPinToPort(p)] |= digitalPinToBitMask(p);
@@ -153,6 +155,61 @@ int main() {
   assert(sequence.index() == 4);
   fakeMillis = 24000; loop();
   assert(sequence.index() == 5 && gasDuty == rover::THROTTLE_NEUTRAL);
+  // Sensor driver: calibrate known stationary bias, integrate fresh gyro data,
+  // reject a sample gap, and recover via a new calibration.
+  fakeMillis=0; Wire.present=true;
+  Wire.bytes[12]=0; Wire.bytes[13]=131; // +1 deg/s stationary gyro bias.
+  imu.begin();
+  for (int i=1;i<=200;++i) { fakeMillis=i*10; imu.update(fakeMillis); }
+  assert(imu.ready && !imu.calibrating && !imu.fault);
+  assert(fabs(imu.yaw)<.001f && fabs(imu.speed)<.001f);
+  Wire.bytes[12]=0x05; Wire.bytes[13]=0x1E; // 1310 raw = +10 deg/s.
+  for (int i=201;i<=300;++i) { fakeMillis=i*10; imu.update(fakeMillis); }
+  assert(fabs(imu.yaw+9)<.01f); // Bias removed; left is negative.
+  fakeMillis+=60; imu.update(fakeMillis);
+  assert(imu.fault && !imu.ready);
+  Wire.bytes[12]=Wire.bytes[13]=0;
+  imu.begin();
+  for (int i=1;i<=200;++i) { fakeMillis+=10; imu.update(fakeMillis); }
+  assert(imu.ready);
+  if (ROVER_ENABLE_IMU) {
+    // Exercise serial dispatch and completion with a calibrated sensor.
+    send("gas 20");
+    send("angle 0 -100 30");
+    assert(gasDuty==rover::throttleDuty(20));
+    send("stop");
+    send("angle 15 -100 30");
+    assert(motion.active);
+    imu.yaw=-30;
+    loop();
+    assert(!motion.active && gasDuty==rover::THROTTLE_NEUTRAL);
+    send("yturn 15 -100");
+    assert(motion.active);
+    send("stop");
+    assert(!motion.active && gasDuty==rover::THROTTLE_NEUTRAL);
+    send("speed 30 0.5"); // Experimental mode is off by default.
+    assert(!motion.active && gasDuty==rover::THROTTLE_NEUTRAL);
+    const rover::Step sensorRoute[]={rover::Turn(15,-100,30),{20,0,1000}};
+    sequence=rover::Sequence(sensorRoute,2);
+    imu.yaw=0;
+    send("run");
+    assert(sequence.running() && motion.active && sequence.index()==0);
+    imu.yaw=-29; loop();
+    assert(sequence.index()==0);
+    imu.yaw=-30; loop();
+    assert(sequence.index()==1 && !motion.active && gasDuty==rover::throttleDuty(20));
+    send("stop");
+    send("angle 15 -100 30");
+    assert(motion.active);
+  }
+  Wire.present=false;
+  fakeMillis+=10; imu.update(fakeMillis);
+  assert(imu.fault && !imu.ready);
+  if (ROVER_ENABLE_IMU) {
+    loop();
+    assert(!motion.active && gasDuty==rover::THROTTLE_NEUTRAL);
+  }
+
 }
 """
 
@@ -161,6 +218,26 @@ with tempfile.TemporaryDirectory(prefix="rover-output-test-") as directory:
     (tmp / "avr").mkdir()
     (tmp / "util").mkdir()
     (tmp / "Arduino.h").write_text(ARDUINO)
+    (tmp / "Wire.h").write_text(r"""
+#pragma once
+#define WIRE_HAS_TIMEOUT 1
+struct FakeWire {
+ bool present=false;
+ uint8_t bytes[14]={0,0,0,0,0x40,0,0,0,0,0,0,0,0,0};
+ uint8_t reg=0, written=0, offset=0, address=0;
+ void begin() {} void setClock(long) {} void setWireTimeout(long,bool) {}
+ void beginTransmission(uint8_t a) {address=a; written=0;}
+ void write(uint8_t b) {if (!written++) reg=b;}
+ uint8_t endTransmission(bool=true) {return present && address==0x68 ? 0 : 4;}
+ uint8_t requestFrom(uint8_t,uint8_t n,uint8_t) {offset=0; return present ? n : 0;}
+ int read() {
+   if (reg==0x75) return 0x70;
+   if (reg==0x3A) return 1;
+   return bytes[offset++ % 14];
+ }
+};
+static FakeWire Wire;
+""")
     (tmp / "avr/io.h").write_text('#include "Arduino.h"\n')
     (tmp / "avr/interrupt.h").write_text('#define ISR(vector) void vector()\n')
     (tmp / "util/atomic.h").write_text(
@@ -168,10 +245,10 @@ with tempfile.TemporaryDirectory(prefix="rover-output-test-") as directory:
         '#define ATOMIC_BLOCK(mode) for (bool once = true; once; once = false)\n'
     )
     (tmp / "test.cpp").write_text(HARNESS)
-    for gas, turn in [(9, 10), (10, 9), (4, 7), (2, 14), (14, 19), (9, 4)]:
+    for gas, turn in [(9, 10), (10, 9), (4, 7), (2, 14), (14, 19), (9, 4), (7, 8)]:
         command = [
             'g++', '-std=c++11', '-Wall', '-Wextra', '-Werror',
-            '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
+            f'-DROVER_ENABLE_IMU={1 if gas==7 else 0}', '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
             f'-DTHROTTLE_PIN={gas}', f'-DSTEERING_PIN={turn}',
             '-I' + str(tmp), '-I' + str(ROOT / 'RoverController'),
             str(tmp / 'test.cpp'), '-o', str(tmp / 'test'),
@@ -179,7 +256,7 @@ with tempfile.TemporaryDirectory(prefix="rover-output-test-") as directory:
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / 'test')], check=True)
         print(f'PASS: throttle={gas}, steering={turn}')
-    for gas, turn in [(0, 10), (9, 1), (20, 10), (9, 9)]:
+    for gas, turn in [(0, 10), (9, 1), (20, 10), (9, 9), (18, 10)]:
         command[command.index(next(x for x in command if x.startswith('-DTHROTTLE_PIN=')))] = f'-DTHROTTLE_PIN={gas}'
         command[command.index(next(x for x in command if x.startswith('-DSTEERING_PIN=')))] = f'-DSTEERING_PIN={turn}'
         result = subprocess.run(command, capture_output=True, text=True)
