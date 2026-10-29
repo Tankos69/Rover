@@ -250,6 +250,22 @@ void status() {
   Serial.print(F("IMU ready=")); Serial.print(imu.ready);
   Serial.print(F(" calibrating=")); Serial.print(imu.calibrating);
   Serial.print(F(" fault=")); Serial.print(imu.fault);
+  Serial.print(F(" error="));
+  switch (imu.error) {
+    case Mpu6500::NONE: Serial.print(F("none")); break;
+    case Mpu6500::NO_DEVICE: Serial.print(F("not-detected")); break;
+    case Mpu6500::RESET_WRITE: Serial.print(F("reset-write")); break;
+    case Mpu6500::CONFIG_WRITE: Serial.print(F("config-write")); break;
+    case Mpu6500::STATUS_READ: Serial.print(F("status-read")); break;
+    case Mpu6500::DATA_READ: Serial.print(F("data-read")); break;
+    case Mpu6500::NO_SAMPLES: Serial.print(F("no-samples")); break;
+    case Mpu6500::SAMPLE_GAP: Serial.print(F("sample-gap")); break;
+    case Mpu6500::SATURATED: Serial.print(F("saturated")); break;
+    case Mpu6500::CAL_MOVING: Serial.print(F("cal-moving")); break;
+    case Mpu6500::CAL_GYRO_NOISE: Serial.print(F("cal-gyro-noise")); break;
+    case Mpu6500::CAL_ACCEL_NOISE: Serial.print(F("cal-accel-noise")); break;
+  }
+  Serial.print(F(" gapMs=")); Serial.print(imu.sampleGapMs);
   Serial.print(F(" yaw(right+)=")); Serial.print(imu.yaw);
   Serial.print(F(" estimated m/s=")); Serial.print(imu.speed);
   Serial.print(F(" Gas=")); printDuty(gasDuty);

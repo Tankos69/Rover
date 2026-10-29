@@ -162,3 +162,25 @@ speed opt-in and throttle bounds, plus calibration/bias integration/read failure
 and command dispatch. Compile the sketch for Arduino Uno before uploading.
 Actual waveform timing, mounted-axis signs, calibration robustness, speed drift,
 turn overshoot and physical Y-turn geometry require testing on the rover.
+
+## Diagnosing `ready=0 fault=1`
+
+`status` now includes a latched `error=...` and the latest fresh-sample interval
+`gapMs`. The error is cleared by a new initialization/calibration attempt, not by
+`stop` or `run`. The turn parameters and output pins do not explain this flag.
+
+- `not-detected`: neither address returned MPU-6500 identity 0x70; check power,
+  I2C wiring/address selection, NCS high, and level shifting.
+- `reset-write`, `config-write`, `status-read`, `data-read`: I2C transaction failed.
+- `no-samples`: no fresh data-ready indication for at least 100 ms.
+- `sample-gap`: over 50 ms between samples after calibration. This can be caused
+  by a software polling delay as well as sensor/bus problems; check `gapMs`.
+- `saturated`: an accelerometer or gyro axis approached the configured range.
+- `cal-moving`: acceleration magnitude or gyro rate failed the stationary check.
+- `cal-gyro-noise`, `cal-accel-noise`: calibration sample variance was excessive.
+
+With motors inactive, keep the rover still, send `calibrate`, wait three seconds,
+then send `status`. If ready, send `run` and capture `status` again after a stop.
+An error already present before driving points to startup/calibration or idle
+sampling; one appearing during driving needs investigation of motor interference,
+vibration and sampling timing. Do not bypass readiness checks to force a turn.

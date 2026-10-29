@@ -167,11 +167,11 @@ int main() {
   for (int i=201;i<=300;++i) { fakeMillis=i*10; imu.update(fakeMillis); }
   assert(fabs(imu.yaw+9)<.01f); // Bias removed; left is negative.
   fakeMillis+=60; imu.update(fakeMillis);
-  assert(imu.fault && !imu.ready);
+  assert(imu.fault && !imu.ready && imu.error==Mpu6500::SAMPLE_GAP && imu.sampleGapMs==60);
   Wire.bytes[12]=Wire.bytes[13]=0;
   imu.begin();
   for (int i=1;i<=200;++i) { fakeMillis+=10; imu.update(fakeMillis); }
-  assert(imu.ready);
+  assert(imu.ready && imu.error==Mpu6500::NONE);
   if (ROVER_ENABLE_IMU) {
     // Exercise serial dispatch and completion with a calibrated sensor.
     send("gas 20");
@@ -204,11 +204,19 @@ int main() {
   }
   Wire.present=false;
   fakeMillis+=10; imu.update(fakeMillis);
-  assert(imu.fault && !imu.ready);
+  assert(imu.fault && !imu.ready && imu.error==Mpu6500::STATUS_READ);
   if (ROVER_ENABLE_IMU) {
     loop();
     assert(!motion.active && gasDuty==rover::THROTTLE_NEUTRAL);
   }
+
+  imu.begin();
+  assert(imu.error==Mpu6500::NO_DEVICE);
+  Wire.present=true;
+  imu.begin();
+  Wire.bytes[12]=0x10; Wire.bytes[13]=0; // Movement during calibration.
+  fakeMillis+=10; imu.update(fakeMillis);
+  assert(imu.error==Mpu6500::CAL_MOVING);
 
 }
 """
