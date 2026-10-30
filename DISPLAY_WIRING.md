@@ -47,6 +47,35 @@ positive on pin 11 lights digit 1's top segment. Do not use an unresisted 5 V
 wire as a test probe. If the map differs, identify the a..g segment anodes and
 four cathodes and connect by their functions instead of these package numbers.
 
+## Complete wiring chart — all 11 connected display pins
+
+This chart uses the front-view numbering above and the default `DISPLAY_PINS`
+mapping in the code. Verify your particular display's pinout before wiring.
+Power off the Uno, rover and sensor first.
+
+| Display pin | Segment or digit | Uno pin | How to connect |
+|---:|---|---|---|
+| 1 | Segment e — lower left | D6 | D6 → **1 kΩ resistor** → display pin 1 |
+| 2 | Segment d — bottom | D5 | D5 → **1 kΩ resistor** → display pin 2 |
+| 4 | Segment c — lower right | D4 | D4 → **1 kΩ resistor** → display pin 4 |
+| 5 | Segment g — middle | D12 | D12 → **1 kΩ resistor** → display pin 5 |
+| 6 | Digit 4 common cathode — rightmost | A3 | Display pin 6 → NPN collector; A3 → **2.2 kΩ resistor** → base |
+| 7 | Segment b — upper right | D3 | D3 → **1 kΩ resistor** → display pin 7 |
+| 8 | Digit 3 common cathode | A2 | Display pin 8 → NPN collector; A2 → **2.2 kΩ resistor** → base |
+| 9 | Digit 2 common cathode | A1 | Display pin 9 → NPN collector; A1 → **2.2 kΩ resistor** → base |
+| 10 | Segment f — upper left | D7 | D7 → **1 kΩ resistor** → display pin 10 |
+| 11 | Segment a — top | D2 | D2 → **1 kΩ resistor** → display pin 11 |
+| 12 | Digit 1 common cathode — leftmost | A0 | Display pin 12 → NPN collector; A0 → **2.2 kΩ resistor** → base |
+
+Each digit uses its **own NPN transistor**, with **emitter → Uno GND** and an
+additional **10 kΩ resistor from base to GND**. A0–A3 control the transistor
+bases; **do not connect the digit cathodes directly to these Uno pins**. Check
+the transistor's actual emitter/base/collector lead order.
+
+**Display pin 3 is the decimal point and stays disconnected.** Thus, exactly
+11 of the display's 12 pins are connected. The sections below show the same
+connections grouped by segments and digit drivers.
+
 ## Segment connections
 
 Power off the Uno, rover and sensor before wiring. Each row gets its **own
