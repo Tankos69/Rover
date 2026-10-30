@@ -52,20 +52,28 @@ int main() {
   for (int i=0;i<4;++i) assert(shown[i]==NUMERALS[0]);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='display-sketch-test-') as directory:
-    tmp = Path(directory)
-    (tmp / 'avr').mkdir()
-    (tmp / 'util').mkdir()
-    (tmp / 'Arduino.h').write_text(arduino.replace('static void delay', 'static inline void delay')
-                                            .replace('static uint32_t millis', 'static inline uint32_t millis'))
-    (tmp / 'avr/interrupt.h').write_text('#define ISR(vector) void vector()\n')
-    (tmp / 'util/atomic.h').write_text(
-        '#define ATOMIC_RESTORESTATE 0\n'
-        '#define ATOMIC_BLOCK(mode) for(bool once=true;once;once=false)\n')
-    (tmp / 'test.cpp').write_text(harness)
-    subprocess.run(['g++', '-std=c++11', '-Wall', '-Wextra', '-Werror',
-                    '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
-                    '-I' + str(tmp), '-I' + str(root / 'DisplayTest'),
-                    str(tmp / 'test.cpp'), '-o', str(tmp / 'test')], check=True)
-    subprocess.run([str(tmp / 'test')], check=True)
-print('PASS: standalone display parsing, leading zeros, invalid input, overflow recovery, clear, isolated diagnostics and two-phase digit routing')
+# Run the same parsing/scan checks for both electrical drive arrangements.
+def run_test(sketch_folder, common_anode):
+    with tempfile.TemporaryDirectory(prefix='display-sketch-test-') as directory:
+        tmp = Path(directory)
+        (tmp / 'avr').mkdir()
+        (tmp / 'util').mkdir()
+        (tmp / 'Arduino.h').write_text(arduino.replace('static void delay', 'static inline void delay')
+                                                .replace('static uint32_t millis', 'static inline uint32_t millis'))
+        (tmp / 'avr/interrupt.h').write_text('#define ISR(vector) void vector()\n')
+        (tmp / 'util/atomic.h').write_text(
+            '#define ATOMIC_RESTORESTATE 0\n'
+            '#define ATOMIC_BLOCK(mode) for(bool once=true;once;once=false)\n')
+        code=harness.replace('DisplayTest.ino',sketch_folder+'.ino')
+        if common_anode:
+            code=code.replace('==bool(NUMERALS[digit+1] & (1<<i))', '==!bool(NUMERALS[digit+1] & (1<<i))')
+            code=code.replace('  setup();', '  setup();\n  for(int i=0;i<7;++i) assert(high(SEGMENT_PINS[i]));\n  for(int i=0;i<4;++i) assert(!high(DIGIT_PINS[i]));')
+        (tmp / 'test.cpp').write_text(code)
+        subprocess.run(['g++', '-std=c++11', '-Wall', '-Wextra', '-Werror',
+                        '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
+                        '-I' + str(tmp), '-I' + str(root / sketch_folder),
+                        str(tmp / 'test.cpp'), '-o', str(tmp / 'test')], check=True)
+        subprocess.run([str(tmp / 'test')], check=True)
+run_test('DisplayTest',False)
+run_test('CommonAnodeDisplayTest',True)
+print('PASS: common-cathode and common-anode standalone display parsing, leading zeros, invalid input, overflow recovery, clear, isolated diagnostics and two-phase digit routing')

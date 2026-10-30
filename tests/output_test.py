@@ -19,6 +19,7 @@ ARDUINO = r"""
 #define A5 19
 #define OUTPUT 1
 #define LOW 0
+#define HIGH 1
 #define F(text) text
 #define _BV(bit) (1U << (bit))
 static volatile uint8_t ports[3] = {};

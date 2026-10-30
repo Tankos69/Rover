@@ -130,6 +130,15 @@ display. Do not also use them for motor outputs. You may edit `DISPLAY_PINS` in
 motor pins. The sketch gives a compile error on a conflict when display support
 is enabled. D0/D1 stay reserved for Serial, A4/A5 for I2C.
 
+## Common-anode alternative
+
+If your display is confirmed **common anode**, use the separate
+[direct common-anode test and 11-pin chart](CommonAnodeDisplayTest/README.md).
+It keeps the same Uno signal assignments but uses seven **2.2 kΩ segment
+resistors** and direct digit-common connections, with no NPN drivers. Do not mix
+that circuit with the common-cathode/NPN circuit described here. The main rover
+display driver has not been converted to common anode.
+
 ## Standalone digit test
 
 Before using the rover firmware, you can upload
