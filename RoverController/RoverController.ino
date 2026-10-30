@@ -8,9 +8,13 @@
 #include <string.h>
 #include "rover_control.h"
 #include "mpu6500.h"
-// Enable only after wiring the bare common-cathode display and NPN drivers.
+// Direct common-cathode display; full digits with adequately limited segment current.
 #ifndef ROVER_ENABLE_DISPLAY
-#define ROVER_ENABLE_DISPLAY 0
+#define ROVER_ENABLE_DISPLAY 1
+#endif
+// 0: digit cathodes directly to Uno (current wiring); 1: legacy NPN drivers.
+#ifndef ROVER_DISPLAY_NPN
+#define ROVER_DISPLAY_NPN 0
 #endif
 #include "turn_display.h"
 

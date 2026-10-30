@@ -1,177 +1,87 @@
-# SH5461AS turn-progress display
+# Common-cathode turn-progress display — current controller
 
-This code drives a **bare 12-pin, common-cathode four-digit seven-segment display**
-using seven segment resistors and four NPN digit drivers. It is not a TM1637 or
-MAX7219 module. SH5461AS is commonly sold with this configuration, but verify
-your particular part's pinout and polarity before wiring: markings from different
-suppliers are not proof of an identical pinout. A common-anode part needs a
-different driver and this circuit/code will not operate it correctly.
+The main `RoverController` now defaults to your **directly connected, common-
+cathode four-digit display**, without NPN drivers, with **all numerals enabled**.
+The temporary 1/4/7 restriction exists only in `DirectCathodeDisplayTest`, not
+in the controller. Keep your corrected bottom-segment wire in the mapping below.
 
-## Parts
+## Configure and upload
 
-- SH5461AS common-cathode display
-- **7 × 1 kΩ** resistors (one per segment; 1/4 W is adequate)
-- **4 × 2.2 kΩ** resistors (NPN base series resistors)
-- **4 × 10 kΩ** resistors (base-to-ground pull-downs)
-- **4 × NPN transistors**, e.g. 2N3904, BC547 or 2N2222
-- Breadboard and jumper wires
-
-Check the emitter/base/collector arrangement for your exact transistors. These
-part families and package variants do not all use the same physical lead order.
-
-At 5 V with a red segment dropping about 2 V, 1 kΩ gives about **3 mA peak per
-segment**. All seven lit is about 21 mA through the active digit's transistor.
-Each digit is on at most 1/4 of the time, so this is a conservative, fairly dim
-starting point. Do not omit the resistors or connect digit commons directly to
-GPIO. Increasing brightness needs a current-budget review or a dedicated driver.
-
-## Identify the display pins
-
-For the common 5461AS layout below, look at the **front, digits upright, decimal
-points at the bottom**. The lower row is pins **1..6 from left to right**. The
-upper row is **12..7 from left to right**:
-
-```text
-        12   11   10    9    8    7
-       +--------------------------+
-       |  digit1 digit2 digit3 digit4 |
-       +--------------------------+
-         1    2    3    4    5    6
-```
-
-**Verify this against your part's datasheet or use a diode test first.** In
-common-cathode operation, the meter's negative lead goes to a digit common and
-its positive lead to a segment; the segment should light if the meter supplies
-sufficient voltage. For example, with this layout, negative on pin 12 and
-positive on pin 11 lights digit 1's top segment. Do not use an unresisted 5 V
-wire as a test probe. If the map differs, identify the a..g segment anodes and
-four cathodes and connect by their functions instead of these package numbers.
-
-## Complete wiring chart — all 11 connected display pins
-
-This chart uses the front-view numbering above and the default `DISPLAY_PINS`
-mapping in the code. Verify your particular display's pinout before wiring.
-Power off the Uno, rover and sensor first.
-
-| Display pin | Segment or digit | Uno pin | How to connect |
-|---:|---|---|---|
-| 1 | Segment e — lower left | D6 | D6 → **1 kΩ resistor** → display pin 1 |
-| 2 | Segment d — bottom | D5 | D5 → **1 kΩ resistor** → display pin 2 |
-| 4 | Segment c — lower right | D4 | D4 → **1 kΩ resistor** → display pin 4 |
-| 5 | Segment g — middle | D12 | D12 → **1 kΩ resistor** → display pin 5 |
-| 6 | Digit 4 common cathode — rightmost | A3 | Display pin 6 → NPN collector; A3 → **2.2 kΩ resistor** → base |
-| 7 | Segment b — upper right | D3 | D3 → **1 kΩ resistor** → display pin 7 |
-| 8 | Digit 3 common cathode | A2 | Display pin 8 → NPN collector; A2 → **2.2 kΩ resistor** → base |
-| 9 | Digit 2 common cathode | A1 | Display pin 9 → NPN collector; A1 → **2.2 kΩ resistor** → base |
-| 10 | Segment f — upper left | D7 | D7 → **1 kΩ resistor** → display pin 10 |
-| 11 | Segment a — top | D2 | D2 → **1 kΩ resistor** → display pin 11 |
-| 12 | Digit 1 common cathode — leftmost | A0 | Display pin 12 → NPN collector; A0 → **2.2 kΩ resistor** → base |
-
-Each digit uses its **own NPN transistor**, with **emitter → Uno GND** and an
-additional **10 kΩ resistor from base to GND**. A0–A3 control the transistor
-bases; **do not connect the digit cathodes directly to these Uno pins**. Check
-the transistor's actual emitter/base/collector lead order.
-
-**Display pin 3 is the decimal point and stays disconnected.** Thus, exactly
-11 of the display's 12 pins are connected. The sections below show the same
-connections grouped by segments and digit drivers.
-
-## Segment connections
-
-Power off the Uno, rover and sensor before wiring. Each row gets its **own
-1 kΩ resistor**, between the Uno pin and display segment pin:
-
-| Segment | Position | Display pin (verify) | Uno pin |
-|---|---|---:|---|
-| a | top | 11 | D2 |
-| b | upper right | 7 | D3 |
-| c | lower right | 4 | D4 |
-| d | bottom | 2 | D5 |
-| e | lower left | 1 | D6 |
-| f | upper left | 10 | D7 |
-| g | middle | 5 | D12 |
-
-Leave display **pin 3 (decimal point)** disconnected. Values are whole degrees,
-with no decimal point or degree symbol. This bare display has no separate VCC
-pin: segment current comes through the Uno output pins and resistors.
-
-## Digit connections — four identical NPN driver circuits
-
-For **each** transistor:
-
-- Emitter **E → Uno GND**.
-- Collector **C → its display digit common** from the table.
-- Base **B → a 2.2 kΩ resistor → its Uno control pin**.
-- An additional **10 kΩ resistor from B to GND** holds the digit off at reset.
-
-| Digit, left to right | Common cathode display pin (verify) | NPN base control via 2.2 kΩ |
-|---|---:|---|
-| 1 | 12 | A0 |
-| 2 | 9 | A1 |
-| 3 | 8 | A2 |
-| 4 | 6 | A3 |
-
-```text
-Uno Ax --- 2.2 kΩ ---+--- B   NPN
-                    |    C -------- digit common cathode
-                   10 kΩ E -------- GND
-                    |
-                   GND
-```
-
-All grounds (Uno, sensor, display transistor emitters and rover signal ground)
-remain common. Leave the MPU-6500 on **A4/A5**, with its existing 3.3 V/level-shifter
-arrangement. Display wiring does not change the sensor's voltage requirements.
-
-This map leaves **D8/D11** available for your current throttle/steering pins and
-also leaves the original D9/D10 pair available. A0..A3 are now occupied by the
-display. Do not also use them for motor outputs. You may edit `DISPLAY_PINS` in
-`turn_display.h` to reroute pins; they must be distinct and must not overlap the
-motor pins. The sketch gives a compile error on a conflict when display support
-is enabled. D0/D1 stay reserved for Serial, A4/A5 for I2C.
-
-## Direct common-cathode alternative
-
-For common-cathode digit commons wired straight to Uno pins, use
-[DirectCathodeDisplayTest](DirectCathodeDisplayTest/README.md), not the NPN driver
-below or the common-anode test. It includes a limited 1 kΩ-resistor test mode
-for numerals 1/4/7 and single segments. Full-number mode requires at least 2 kΩ
-per segment. Its guide provides the same complete 11-pin signal map.
-
-## Common-anode alternative
-
-If your display is confirmed **common anode**, use the separate
-[direct common-anode test and 11-pin chart](CommonAnodeDisplayTest/README.md).
-It keeps the same Uno signal assignments but uses seven **2.2 kΩ segment
-resistors** and direct digit-common connections, with no NPN drivers. Do not mix
-that circuit with the common-cathode/NPN circuit described here. The main rover
-display driver has not been converted to common anode.
-
-## Standalone digit test
-
-Before using the rover firmware, you can upload
-[DisplayTest/DisplayTest.ino](DisplayTest/DisplayTest.ino) and send any four digits
-through Serial Monitor, e.g. `0042`. See [test instructions](DisplayTest/README.md).
-It uses the same wiring. Disconnect motor power while running the standalone test.
-
-## Enable and use
-
-Download the **whole updated RoverController folder**, including headers. In
-`RoverController.ino` change:
+Download the **whole updated RoverController folder**, including every header.
+The defaults near the top of the sketch are:
 
 ```cpp
 #define ROVER_ENABLE_DISPLAY 1
+#define ROVER_DISPLAY_NPN 0
 ```
 
-Display support defaults to 0 so old wiring/pin selections remain usable until
-you connect the new hardware. Preserve your motor pin definitions, e.g.:
+Preserve your own motor pins, for example:
 
 ```cpp
 #define THROTTLE_PIN 8
 #define STEERING_PIN 11
 ```
 
-Upload for Arduino Uno, calibrate stationary, then use your existing route:
+The repository's motor defaults remain D9/D10. Both D8/D11 and D9/D10 are free
+with this display map. A0..A3 are occupied by the display, A4/A5 by the MPU-6500.
+Compile-time checks reject overlapping display and motor pins.
+
+## Current limiting
+
+Full-digit direct drive assumes each segment has adequate current limiting:
+**2.2 kΩ per segment**, or **two 1 kΩ resistors in series per segment (2 kΩ)**,
+seven segment paths in total. There is no per-pattern segment-count restriction
+in this controller.
+At about 5 V and 2 V red LED drop, 2.2 kΩ gives about 1.4 mA per lit segment,
+about 10 mA through a selected common-cathode GPIO with all seven lit. Multiplex
+operation reduces average current but not the instantaneous digit-pin current.
+
+Power off before rewiring. Do not mix direct connections with the old NPN base
+resistors/pull-downs, and do not tie all digit commons permanently to GND.
+The display has no separate VCC connection; the Uno outputs supply/sink LED
+current through the seven resistors. Existing circuit grounds remain common.
+
+## Pin numbering
+
+Verify your specific display's datasheet/pinout. For the usual 5461AS layout,
+look at the front with digits upright and decimal points at the bottom:
+
+```text
+Top:       12  11  10   9   8   7
+          +---------------------+
+          |  digit1 ... digit4  |
+          +---------------------+
+Bottom:     1   2   3   4   5   6
+```
+
+A diode test with negative on digit common pin 12 and positive on segment pin
+11 should light the first digit's top segment if this map and common-cathode
+polarity match and the meter supplies sufficient voltage. Pin count alone does
+not establish polarity. Do not test with an unresisted 5 V supply.
+
+## Complete wiring chart — all 11 connected display pins
+
+| Display pin (verify) | Segment or digit | Uno pin | Connection |
+|---:|---|---|---|
+| 1 | Segment e — lower left | D6 | Through its own segment resistor |
+| 2 | Segment d — bottom horizontal | D5 | Through its own segment resistor |
+| 4 | Segment c — lower right | D4 | Through its own segment resistor |
+| 5 | Segment g — middle | D12 | Through its own segment resistor |
+| 6 | Digit 4 common cathode — rightmost | A3 | Direct |
+| 7 | Segment b — upper right | D3 | Through its own segment resistor |
+| 8 | Digit 3 common cathode | A2 | Direct |
+| 9 | Digit 2 common cathode | A1 | Direct |
+| 10 | Segment f — upper left | D7 | Through its own segment resistor |
+| 11 | Segment a — top | D2 | Through its own segment resistor |
+| 12 | Digit 1 common cathode — leftmost | A0 | Direct |
+
+**Display pin 3, the decimal point, stays disconnected.** Each segment resistor
+is 2.2 kΩ or 2 kΩ as described above. Verify function-to-pin assignments on your
+part rather than assuming all suppliers use the same package map.
+
+## What is displayed
+
+Your existing angle step works without a new display command:
 
 ```cpp
 const rover::Step PROGRAM[] = {
@@ -181,70 +91,49 @@ const rover::Step PROGRAM[] = {
 };
 ```
 
-- Before the first angle/Y turn the display is blank.
-- Each accepted angle/Y turn resets the reading to **0** at that turn's origin.
-- It shows integrated heading change toward the requested direction, rounded to
-  the nearest whole degree: a left or right 90-degree turn normally shows 0..90.
-- Rotation opposite the requested direction shows negative progress, e.g. `-12`.
-- On completion or manual cancellation the last measured progress stays visible
-  until another angle/Y turn begins (or power/reset). A Y turn displays cumulative
-  progress across all three legs, up to its 180-degree target.
-- Sensor faults/timeouts during the turn display **`----`**. Out-of-range or
-  nonfinite values also show dashes. Range is -999..9999 whole degrees.
-- Timed turns and ordinary `turn` commands do not start a new angle measurement.
+- Initially blank; each accepted angle/Y turn starts at **0**.
+- Displays the heading change measured by the gyro since the turn began,
+  rounded to whole degrees. A normal left or right 90-degree turn shows 0..90.
+- All numeral glyphs, 0..9, are enabled. Negative progress indicates rotation
+  opposite the requested direction, for example `-12`.
+- Completion or manual `stop` freezes the last measured value. The next angle/Y
+  turn resets the origin and displayed progress to zero. A Y turn shows cumulative
+  change across its three legs, up to the 180-degree target.
+- Sensor failure or timeout during the turn shows `----`. Nonfinite/out-of-range
+  values also show dashes; the numeric display range is -999..9999.
+- Timed turns and ordinary manual `turn` commands do not start angle tracking.
 
-This is the same gyro-derived estimate used to decide when the turn completes,
-not the target number, a compass bearing, or an independent angle measurement.
-Drift and physical overshoot still apply. A displayed 90 does not prove an exact
-90-degree physical stop. Display rounding does not affect the motion controller.
+This shows the controller's estimate, not the requested angle or an independent
+measurement. Gyro drift, rounding and physical overshoot still apply. Display
+rounding does not change when the motion controller advances to the next step.
 
-For a first functional check, keep **motor power disconnected**, calibrate the
-stationary rover, then send `angle 14 -100 90`. Turn the chassis left by hand:
-the value should increase. Complete the test before its 15-second timeout, or
-send `stop`. A stationary chassis with wheels spinning will not show a heading
-change. If segments/digits are wrong, recheck pin numbering and polarity.
+Keep the rover stationary for gyro calibration; `status` must show ready before
+a sensor turn can start. With motor power disconnected, you can send
+`angle 14 -100 90` at 115200 baud and rotate the chassis left by hand to check the
+display within its 15-second timeout. A stationary chassis with spinning wheels
+does not change heading. For individual segment checks use
+[the direct-cathode test](DirectCathodeDisplayTest/README.md); its full-number
+option is separate from the main controller.
 
-## Timing and verification
+## Other circuits and timing
 
-Timer2 scans one digit every 1 ms (250 Hz per complete four-digit refresh).
-The scan blanks all digits, then uses a second compare about 64 microseconds
-later to change segments and select one digit, allowing transistor turn-off.
-It keeps refreshing during normal Wire/Serial waits without delays in the main
-loop. Timer1 continues to generate the motor signals; Timer0 still runs millis().
+The [legacy NPN circuit](NPN_DISPLAY_WIRING.md) remains supported with
+`ROVER_DISPLAY_NPN=1`. Use only the driver mode matching your physical wiring.
+The [common-anode test](CommonAnodeDisplayTest/README.md) is separate hardware
+and is not the main controller's display driver.
 
+Timer2 scans one digit per millisecond, giving about 250 Hz per complete frame.
+All digit cathodes go HIGH (off); about 64 microseconds later segments update
+and one cathode goes LOW (on). This all-off interval reduces mixed-digit artifacts.
+In NPN mode the digit polarity is reversed. No blocking refresh delays are used.
+
+Timer1 remains responsible for 62.66 Hz motor signals. The Timer2 ISR adds some
+edge jitter for arbitrary motor pins such as D8/D11; D9/D10 use hardware PWM.
 Do not add `tone()`, Timer2 libraries, or `analogWrite()` on D3/D11 while the
-display is enabled. **D11 remains valid as a timer-driven rover digital output**;
-this driver does not connect Timer2's hardware PWM outputs to D3/D11. The short
-scan ISR adds interrupt latency/jitter to motor signals on arbitrary pins,
-including D8/D11. D9/D10 hardware PWM avoids that edge jitter. Verify waveforms
-on the actual rover. Code tests do not establish physical brightness, flicker,
-transistor lead order, pinout, or motor-signal timing.
+display runs. D11 remains available as a digital rover motor-signal output.
 
-Tests cover number formatting, signed progress/retention, fault state, multiplex
-routing, digit exclusivity, pin conflict rejection and preserving motor GPIO:
-
-```sh
-g++ -std=c++11 -Wall -Wextra -Werror tests/display_test.cpp -o /tmp/rover-display-test
-/tmp/rover-display-test
-python3 tests/output_test.py
-```
-
-## Why equal digits may work while mixed digits do not
-
-The digit outputs are **active HIGH because they drive NPN bases**. If you connect
-the four display cathodes directly to A0..A3 instead of using transistors, LOW
-turns a digit on: three digits become selected instead of one. Their different
-segment patterns overlap. `4444` may look fine while `1234` looks nonsensical.
-This is not proof of a broken display or incorrect numeral encoding.
-
-Power off and replace each direct common-cathode connection with its specified
-NPN driver: common cathode → collector, emitter → GND, Uno output → 2.2 kΩ →
-base, and base → 10 kΩ → GND. Check transistor lead order. The segment resistors
-remain in place. Do not just remove resistors or invert wires with power on.
-
-The driver also now blanks all digits before each switch and uses a second
-Timer2 compare about 64 microseconds later to change segments and enable one
-digit. This leaves time for transistor turn-off and reduces switching ghosting.
-No blocking delay is used. Physical wiring remains necessary; blanking does not
-make direct-cathode wiring compatible. See the standalone test's `digit` and
-`segment` commands to verify one position/segment at a time after wiring.
+Software tests cover motor-pin preservation, both digit-driver polarities,
+full glyphs (including 8888), angle command -> gyro heading -> visible digits,
+completion retention, new-turn reset, wrong-way progress and fault dashes.
+Uno compilation and simulated tests cannot establish physical current, waveform
+timing, mounting signs, brightness, heading accuracy or electrical compatibility.

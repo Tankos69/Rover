@@ -2,8 +2,8 @@
 
 Use this sketch **only for a confirmed common-anode bare four-digit display**.
 It uses the same Uno pin assignments as our previous guide, but **no NPN digit
-drivers**. The existing `DisplayTest` and `RoverController` display driver remain
-for the common-cathode/NPN arrangement; this test does not change their polarity.
+drivers**. The existing `DisplayTest` uses common-cathode/NPN wiring; the main
+`RoverController` defaults to direct common cathode (with optional NPN mode); this test does not change their polarity.
 
 ## Confirm polarity and package pinout
 

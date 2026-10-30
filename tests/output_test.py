@@ -63,6 +63,20 @@ static void send(const char* text) {
   strcpy(line, text);
   command(line);
 }
+#if ROVER_ENABLE_DISPLAY
+static void checkDisplay(const uint8_t expected[4]) {
+  for (int digit=0;digit<4;++digit) {
+    TIMER2_COMPA_vect();
+    for (int i=0;i<4;++i) assert(high(DISPLAY_PINS[7+i])==!bool(ROVER_DISPLAY_NPN));
+    TIMER2_COMPB_vect();
+    for (int i=0;i<4;++i) {
+      bool selected=i==digit && expected[digit]!=0;
+      assert(high(DISPLAY_PINS[7+i])==bool(ROVER_DISPLAY_NPN ? selected : !selected));
+    }
+    for (int i=0;i<7;++i) assert(high(DISPLAY_PINS[i])==bool(expected[digit] & (1<<i)));
+  }
+}
+#endif
 int main() {
   beginSignals();
   gasDuty = 946;
@@ -262,20 +276,45 @@ int main() {
   const uint8_t expected[4]={0,0x06,0x7f,0x3f};
   for (int digit=0;digit<4;++digit) {
     TIMER2_COMPA_vect();
-    for (int i=0;i<4;++i) assert(!high(DISPLAY_PINS[7+i]));
+    for (int i=0;i<4;++i) assert(high(DISPLAY_PINS[7+i])==!bool(ROVER_DISPLAY_NPN));
     TIMER2_COMPB_vect();
-    for (int i=0;i<4;++i) assert(high(DISPLAY_PINS[7+i])==(i==digit && expected[digit]!=0));
+    for (int i=0;i<4;++i) assert(high(DISPLAY_PINS[7+i])==bool(ROVER_DISPLAY_NPN ? (i==digit && expected[digit]!=0) : !(i==digit && expected[digit]!=0)));
     for (int i=0;i<7;++i) assert(high(DISPLAY_PINS[i])==bool(expected[digit] & (1<<i)));
   }
   assert(high(THROTTLE_PIN)==motorBefore[0] && high(STEERING_PIN)==motorBefore[1]);
+  const uint8_t zero[4]={0,0,0,0x3f};
+  turnDisplay.show(0,true,true); checkDisplay(zero);
+  const uint8_t allEight[4]={0x7f,0x7f,0x7f,0x7f};
+  turnDisplay.show(8888,true,true); checkDisplay(allEight);
   turnDisplay.show(0,true,false);
   for (int digit=0;digit<4;++digit) {
     TIMER2_COMPA_vect();
     TIMER2_COMPB_vect();
-    assert(high(DISPLAY_PINS[7+digit]));
+    assert(high(DISPLAY_PINS[7+digit])==bool(ROVER_DISPLAY_NPN));
     assert(high(DISPLAY_PINS[6])); // Fault dashes.
     assert(!high(DISPLAY_PINS[0]));
   }
+#if ROVER_ENABLE_IMU
+  // Real command -> IMU yaw -> loop -> display -> multiplex GPIO integration.
+  Wire.present=true;
+  for (int i=0;i<14;++i) Wire.bytes[i]=0;
+  Wire.bytes[4]=0x40;
+  imu.begin();
+  for (int i=0;i<200;++i) {fakeMillis+=10; imu.update(fakeMillis);}
+  assert(imu.ready);
+  send("angle 14 -100 90"); loop(); checkDisplay(zero);
+  imu.yaw=-45; loop();
+  const uint8_t fortyFive[4]={0,0,0x66,0x6d}; checkDisplay(fortyFive);
+  imu.yaw=-90; loop();
+  const uint8_t ninety[4]={0,0,0x6f,0x3f}; checkDisplay(ninety);
+  assert(!motion.active && gasDuty==rover::THROTTLE_NEUTRAL);
+  loop(); checkDisplay(ninety); // Retained after completion.
+  send("angle 14 100 90"); loop(); checkDisplay(zero); // New origin.
+  imu.yaw=-91; loop();
+  const uint8_t minusOne[4]={0,0,0x40,0x06}; checkDisplay(minusOne);
+  Wire.present=false; fakeMillis+=10; loop();
+  const uint8_t dashes[4]={0x40,0x40,0x40,0x40}; checkDisplay(dashes);
+#endif
 #endif
 
 }
@@ -313,10 +352,10 @@ static FakeWire Wire;
         '#define ATOMIC_BLOCK(mode) for (bool once = true; once; once = false)\n'
     )
     (tmp / "test.cpp").write_text(HARNESS)
-    for gas, turn in [(9, 10), (10, 9), (4, 7), (2, 14), (14, 19), (9, 4), (7, 8), (8, 11)]:
+    for gas, turn in [(9, 10), (10, 9), (4, 7), (2, 14), (14, 19), (9, 4), (7, 8), (8, 11), (11, 8)]:
         command = [
             'g++', '-std=c++11', '-Wall', '-Wextra', '-Werror',
-            f'-DROVER_ENABLE_IMU={1 if gas==7 else 0}', f'-DROVER_ENABLE_DISPLAY={1 if gas==8 else 0}', '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
+            f'-DROVER_ENABLE_IMU={1 if gas in (7,8) else 0}', f'-DROVER_ENABLE_DISPLAY={1 if gas in (8,11) else 0}', f'-DROVER_DISPLAY_NPN={1 if gas==11 else 0}', '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
             f'-DTHROTTLE_PIN={gas}', f'-DSTEERING_PIN={turn}',
             '-I' + str(tmp), '-I' + str(ROOT / 'RoverController'),
             str(tmp / 'test.cpp'), '-o', str(tmp / 'test'),

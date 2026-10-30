@@ -6,7 +6,7 @@ to be installed. It replaces the rover firmware while you test the display.
 **Disconnect rover motor power**: the test does not generate neutral motor
 signals. The MPU-6500 is not used and can remain connected to A4/A5.
 
-Use exactly the resistor/transistor wiring in the [11-pin chart](../DISPLAY_WIRING.md#complete-wiring-chart--all-11-connected-display-pins).
+Use exactly the resistor/transistor wiring in the [11-pin chart](../NPN_DISPLAY_WIRING.md#complete-wiring-chart--all-11-connected-display-pins).
 This is for a bare common-cathode display, with seven 1 kΩ segment resistors,
 four NPN digit drivers, four 2.2 kΩ base resistors and four 10 kΩ base pull-downs.
 Do not connect digit commons directly to the Uno pins.
@@ -52,7 +52,7 @@ select one digit. With common cathodes connected straight to Uno pins, LOW
 selects a digit instead: three digits become active when the code intends one.
 Repeated patterns can look correct even though selection is wrong. Do not use
 this firmware with digit commons wired directly to GPIO; power off and install
-the four NPN circuits from the wiring guide.
+the four NPN circuits from the NPN wiring guide.
 
 After correcting the hardware, these commands isolate wiring faults:
 

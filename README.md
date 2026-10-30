@@ -8,16 +8,17 @@ before connecting the rover. The period is about **15.959 ms**.
 
 ## Four-digit turn-progress display
 
-See [SH5461AS wiring and setup](DISPLAY_WIRING.md) for the bare common-cathode
-LED display, resistors, four transistor digit drivers and the enable setting.
-For **direct common-cathode wiring with your 1 kΩ resistors**, see
-[DirectCathodeDisplayTest](DirectCathodeDisplayTest/README.md) (limited digits 1/4/7).
-For the common-cathode/NPN standalone test, see [DisplayTest](DisplayTest/README.md).
-For a **confirmed common-anode** display wired directly with 2.2 kΩ segment
-resistors, see [CommonAnodeDisplayTest](CommonAnodeDisplayTest/README.md).
-It displays measured whole degrees during angle/Y turns and retains the last
-value afterward. Display support defaults off; its default pins leave D8/D11
-and D9/D10 available for the motor signals.
+The main controller now defaults to **direct common-cathode wiring**, with the
+display **enabled** and all numerals available. See [the current 11-pin wiring
+chart and setup](DISPLAY_WIRING.md). It shows measured whole degrees during
+angle/Y turns, resets at the next turn and retains the last value afterward.
+The default map leaves D8/D11 and D9/D10 available for motor signals.
+
+The temporary 1/4/7 limit applies only to the separate
+[DirectCathodeDisplayTest](DirectCathodeDisplayTest/README.md), not this controller.
+For [NPN-driver wiring](NPN_DISPLAY_WIRING.md), set `ROVER_DISPLAY_NPN` to 1;
+the standalone [DisplayTest](DisplayTest/README.md) also uses NPN drivers.
+The [common-anode test](CommonAnodeDisplayTest/README.md) is for different hardware.
 
 ## MPU-6500 integration
 

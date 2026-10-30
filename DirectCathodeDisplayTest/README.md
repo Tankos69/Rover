@@ -87,5 +87,6 @@ Then change the definition near the top of the sketch to:
 Re-upload. All four-digit values, including 0042 and 8888, are then accepted.
 Do not enable full mode while retaining a single 1 kΩ resistor per segment.
 An alternative for more brightness is the original NPN circuit with its matching
-firmware. The main rover display driver still expects that NPN arrangement;
-this standalone test does not convert its driver to direct-cathode operation.
+firmware. The main rover controller now defaults to direct common-cathode wiring with all
+numerals enabled; see [current controller wiring](../DISPLAY_WIRING.md). Its
+optional NPN mode uses the original transistor circuit.

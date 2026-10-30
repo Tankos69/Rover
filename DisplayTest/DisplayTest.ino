@@ -1,5 +1,5 @@
 // Standalone SH5461AS common-cathode display test for Arduino Uno.
-// Use the resistor/NPN wiring in DISPLAY_WIRING.md. Disconnect motor power.
+// Use the resistor/NPN wiring in NPN_DISPLAY_WIRING.md. Disconnect motor power.
 // Serial Monitor: 115200 baud, newline or carriage return. Send e.g. 0042.
 #include <Arduino.h>
 #include <avr/interrupt.h>
