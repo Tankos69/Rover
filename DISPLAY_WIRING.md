@@ -130,6 +130,13 @@ display. Do not also use them for motor outputs. You may edit `DISPLAY_PINS` in
 motor pins. The sketch gives a compile error on a conflict when display support
 is enabled. D0/D1 stay reserved for Serial, A4/A5 for I2C.
 
+## Standalone digit test
+
+Before using the rover firmware, you can upload
+[DisplayTest/DisplayTest.ino](DisplayTest/DisplayTest.ino) and send any four digits
+through Serial Monitor, e.g. `0042`. See [test instructions](DisplayTest/README.md).
+It uses the same wiring. Disconnect motor power while running the standalone test.
+
 ## Enable and use
 
 Download the **whole updated RoverController folder**, including headers. In
