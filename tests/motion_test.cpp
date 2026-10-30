@@ -39,5 +39,21 @@ int main() {
   assert(!m.start(Turn(0,100,30),0,0,true,false));
   assert(!m.start(Turn(15,0,30),0,0,true,false));
   assert(!m.start(Turn(15,100,-30),0,0,true,false));
+  assert(m.start(Turn(15,50,90),0,0,true,false));
+  assert(!m.update(2999,0,0,true,false));
+  assert(m.update(3000,0,0,true,false) && m.failure==MotionControl::NO_PROGRESS);
+  assert(m.gas==0 && m.steering==0);
+  assert(m.start(Turn(15,50,90),0,0,true,false));
+  assert(!m.update(2999,2,0,true,false)); // Meaningful motion refreshes deadline.
+  assert(!m.update(5998,2,0,true,false));
+  assert(m.update(5999,2,0,true,false) && m.failure==MotionControl::NO_PROGRESS);
+  assert(m.start(Turn(-60,50,90),0,0,true,false));
+  assert(!m.update(2999,0,0,true,true)); // Reverse handshake not treated as stalled.
+  assert(!m.update(3000,0,0,true,false));
+  assert(m.update(5999,0,0,true,false) && m.failure==MotionControl::NO_PROGRESS);
+  assert(m.start(Turn(15,50,90,1000),0,0,true,false));
+  assert(m.update(1000,0,0,true,false) && m.failure==MotionControl::TIMEOUT);
+  assert(m.start(Turn(15,50,90),UINT32_MAX-100,0,true,false));
+  assert(m.update(2899,0,0,true,false) && m.failure==MotionControl::NO_PROGRESS);
   puts("PASS: directed angle targets, wraparound, sensor loss, timeout, Y turn, speed opt-in and bounds");
 }

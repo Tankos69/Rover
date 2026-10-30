@@ -110,7 +110,8 @@ rounding does not change when the motion controller advances to the next step.
 Keep the rover stationary for gyro calibration; `status` must show ready before
 a sensor turn can start. With motor power disconnected, you can send
 `angle 14 -100 90` at 115200 baud and rotate the chassis left by hand to check the
-display within its 15-second timeout. A stationary chassis with spinning wheels
+display. Start rotating within three seconds and continue progressing; otherwise
+the no-progress guard requests neutral. The total turn timeout is 15 seconds. A stationary chassis with spinning wheels
 does not change heading. For individual segment checks use
 [the direct-cathode test](DirectCathodeDisplayTest/README.md); its full-number
 option is separate from the main controller.

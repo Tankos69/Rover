@@ -317,6 +317,47 @@ int main() {
 #endif
 #endif
 
+  // Distinguish a short burst, a timeout, and a register-address NACK.
+  for (int failure=0;failure<3;++failure) {
+    Wire.present=true; Wire.failAtReg=255;
+    Wire.shortCount=-1; Wire.failTxCode=0; Wire.injectTimeout=false;
+    for (int i=0;i<14;++i) Wire.bytes[i]=0;
+    Wire.bytes[4]=0x40;
+    Mpu6500 probe; probe.begin();
+    for (int i=0;i<200;++i) {fakeMillis+=10; probe.update(fakeMillis);}
+    assert(probe.ready);
+    Wire.failAtReg=0x3b;
+    if (failure==0) Wire.shortCount=5;
+    if (failure==1) {Wire.shortCount=0; Wire.injectTimeout=true;}
+    if (failure==2) Wire.failTxCode=2;
+    fakeMillis+=10; probe.update(fakeMillis);
+    assert(probe.error==Mpu6500::DATA_READ && !probe.ready);
+    assert(probe.i2cAddress==0x68 && probe.i2cRegister==0x3b && probe.i2cRequested==14);
+    assert(probe.i2cReceived==(failure==0 ? 5 : 0));
+    assert(probe.i2cTxStatus==(failure==2 ? 2 : 0));
+    assert(probe.i2cTimeout==(failure==1));
+    Wire.failAtReg=255; fakeMillis+=10; probe.update(fakeMillis);
+    assert(probe.error==Mpu6500::DATA_READ && probe.i2cRegister==0x3b); // Latched.
+  }
+
+#if ROVER_ENABLE_IMU && ROVER_ENABLE_DISPLAY
+  // A stationary, healthy sensor must trigger the no-progress stop and queue
+  // neutral pulses, not hold drive indefinitely while waiting for 90 degrees.
+  Wire.present=true; Wire.failAtReg=255; Wire.shortCount=-1;
+  Wire.failTxCode=0; Wire.injectTimeout=false;
+  for (int i=0;i<14;++i) Wire.bytes[i]=0;
+  Wire.bytes[4]=0x40;
+  imu.begin();
+  for (int i=0;i<200;++i) {fakeMillis+=10; imu.update(fakeMillis);}
+  assert(imu.ready);
+  send("angle 15 50 90");
+  for (int i=0;i<300;++i) {fakeMillis+=10; loop();}
+  assert(!motion.active && motion.failure==rover::MotionControl::NO_PROGRESS);
+  assert(gasDuty==rover::THROTTLE_NEUTRAL && turnDuty==rover::STEERING_NEUTRAL);
+  assert(requestedGasTicks==rover::dutyTicks(rover::THROTTLE_NEUTRAL));
+  assert(requestedTurnTicks==rover::dutyTicks(rover::STEERING_NEUTRAL));
+#endif
+
 }
 """
 
@@ -330,13 +371,29 @@ with tempfile.TemporaryDirectory(prefix="rover-output-test-") as directory:
 #define WIRE_HAS_TIMEOUT 1
 struct FakeWire {
  bool present=false;
+ int shortCount=-1;
+ uint8_t failAtReg=255, failTxCode=0;
+ bool injectTimeout=false, timeout=false;
  uint8_t bytes[14]={0,0,0,0,0x40,0,0,0,0,0,0,0,0,0};
  uint8_t reg=0, written=0, offset=0, address=0;
- void begin() {} void setClock(long) {} void setWireTimeout(long,bool) {}
+ void begin() {} void setClock(long) {} void setWireTimeout(long,bool) {timeout=false;}
+ void clearWireTimeoutFlag() {timeout=false;}
+ bool getWireTimeoutFlag() {return timeout;}
  void beginTransmission(uint8_t a) {address=a; written=0;}
  void write(uint8_t b) {if (!written++) reg=b;}
- uint8_t endTransmission(bool=true) {return present && address==0x68 ? 0 : 4;}
- uint8_t requestFrom(uint8_t,uint8_t n,uint8_t) {offset=0; return present ? n : 0;}
+ uint8_t endTransmission(bool=true) {
+   if (!present || address!=0x68) return 4;
+   if (reg==failAtReg && failTxCode) {timeout=injectTimeout; return failTxCode;}
+   return 0;
+ }
+ uint8_t requestFrom(uint8_t,uint8_t n,uint8_t) {
+   offset=0;
+   if (reg==failAtReg) {
+     timeout=injectTimeout;
+     if (shortCount>=0) return shortCount;
+   }
+   return present ? n : 0;
+ }
  int read() {
    if (reg==0x75) return 0x70;
    if (reg==0x3A) return 1;

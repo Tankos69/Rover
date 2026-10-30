@@ -83,7 +83,11 @@ ISR(TIMER2_COMPA_vect) { turnDisplay.tick(); }
 ISR(TIMER2_COMPB_vect) { turnDisplay.light(); }
 #endif
 Mpu6500 imu;
-rover::MotionControl motion;
+// Stop a degree turn early if no meaningful heading progress is measured.
+constexpr uint32_t TURN_NO_PROGRESS_MS=3000;
+constexpr float TURN_MIN_PROGRESS_DEGREES=1.0f;
+static_assert(TURN_NO_PROGRESS_MS>0 && TURN_MIN_PROGRESS_DEGREES>0,"Turn progress limits must be positive");
+rover::MotionControl motion(TURN_NO_PROGRESS_MS,TURN_MIN_PROGRESS_DEGREES);
 rover::Sequence sequence(PROGRAM, sizeof(PROGRAM) / sizeof(PROGRAM[0]));
 rover::Throttle throttle(rover::throttleDuty(BRAKE_PERCENT),
                          BRAKE_HOLD_MS, REVERSE_NEUTRAL_MS);
@@ -303,6 +307,15 @@ void status() {
     Serial.print(F("program step ")); Serial.println(sequence.index() + 1);
   } else if (motion.active) Serial.println(F("sensor motion"));
   else Serial.println(F("manual/idle"));
+  if (imu.fault && (imu.error==Mpu6500::NO_DEVICE || imu.error==Mpu6500::RESET_WRITE ||
+      imu.error==Mpu6500::CONFIG_WRITE || imu.error==Mpu6500::STATUS_READ || imu.error==Mpu6500::DATA_READ)) {
+    Serial.print(F("I2C fault (decimal): address=")); Serial.print(imu.i2cAddress);
+    Serial.print(F(" reg=")); Serial.print(imu.i2cRegister);
+    Serial.print(F(" tx=")); Serial.print(imu.i2cTxStatus);
+    Serial.print(F(" requested=")); Serial.print(imu.i2cRequested);
+    Serial.print(F(" received=")); Serial.print(imu.i2cReceived);
+    Serial.print(F(" timeout=")); Serial.println(imu.i2cTimeout);
+  }
   if (imu.error == Mpu6500::CAL_MOVING) {
     // The driver stops sampling on a fault: these are the values that failed,
     // not a new reading taken after the rover has stopped moving.
@@ -466,7 +479,11 @@ void loop() {
     if (motion.active) movement(motion.gas,motion.steering);
     else if (motion.failed) {
       cancelProgram(); neutral();
-      Serial.println(F("Motion stopped: sensor stale/fault or timeout."));
+      if (motion.failure==rover::MotionControl::NO_PROGRESS)
+        Serial.println(F("Motion stopped: no heading progress; neutral requested."));
+      else if (motion.failure==rover::MotionControl::TIMEOUT)
+        Serial.println(F("Motion stopped: total motion timeout; neutral requested."));
+      else Serial.println(F("Motion stopped: sensor stale/fault; neutral requested."));
     } else if (!sequence.running()) neutral();
   }
   if (!motion.active && sequence.update(now)) {

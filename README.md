@@ -23,7 +23,9 @@ The [common-anode test](CommonAnodeDisplayTest/README.md) is for different hardw
 ## MPU-6500 integration
 
 See [sensor-controlled turns, experimental speed control and Y turns](SENSOR_CONTROL.md)
-for wiring, mounting, calibration, route examples and accuracy limits. Sensor
+for wiring, mounting, calibration, route examples and accuracy limits. Angle/Y
+turns request neutral after three seconds without at least one degree of heading
+progress, in addition to the total motion timeout. Sensor
 support is enabled by default and reserves A4/A5; old timed rows still work.
 Speed estimation/control is experimental and disabled by default. A gyro-based
 180-degree Y turn does not guarantee returning to the same position.

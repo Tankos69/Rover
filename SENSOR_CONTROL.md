@@ -65,7 +65,7 @@ steering produces a left heading change. Motion in the wrong direction cannot
 satisfy the target. Unwrapped integration allows turns across 360 degrees.
 
 Optional fourth argument is the entire motion's timeout in milliseconds:
-`rover::Turn(15, -100, 30, 10000)`. Default is 15 seconds. Timeout includes any
+`rover::Turn(15, -100, 30, 10000)`. Default is 15 seconds, with an earlier no-progress stop described below. Timeout includes any
 reverse handshake. Ordinary timed reverse rows still retain their full movement
 duration after the brake/neutral waits. An angle step measures heading throughout
 the motion, including any rotation while braking; it does not pause integration.
@@ -218,3 +218,75 @@ passes the gravity check, but shows the sensor Z axis pointing down. This
 controller assumes Z **up**, X forward and Y left. Remount accordingly before
 using angle/Y-turn commands; bias calibration does not correct mounting axes.
 Confirm a rightward hand rotation increases `yaw(right+)` before powered turns.
+
+## I2C details for `data-read` and other bus failures
+
+For a latched bus fault, `status` prints a second line without accessing the bus:
+
+```text
+I2C fault (decimal): address=104 reg=59 tx=0 requested=14 received=5 timeout=0
+```
+
+These are diagnostic values, not an example of a successful read:
+
+- Address 104/105 is 0x68/0x69; register 59 is 0x3B, the acceleration/temp/gyro
+  burst. Register 58 is 0x3A (data-ready status).
+- `tx` is the AVR Wire result for selecting the register: 0 success, 1 buffer
+  overflow, 2 address NACK, 3 data NACK, 4 other error, 5 timeout.
+- `requested` and `received` distinguish an incomplete burst from a failed
+  register-address write. If `tx!=0`, no read is attempted and received is 0.
+- `timeout=1` means Wire's timeout flag was raised during this transaction.
+  `timeout=0` does not mean the bus is healthy if a NACK/short read occurred.
+
+The 3 ms Wire timeout and 50 ms integration-gap rule have not been widened.
+`gapMs=10` reports the interval before the attempted sample, not how long the
+failed Wire operation took; it does not rule out a bus timeout. The fields are
+cleared at the start of each transaction; sampling stops on the first fault so
+its details are retained until a new initialization/calibration attempt.
+
+Calibration may succeed and the sensor subsequently lose communication. A timed
+route step can still execute with a faulted sensor; an angle step refuses to
+start without a fresh calibrated sensor. Therefore a failure first noticed at
+`Turn(...)` may have happened during the preceding throttle step.
+
+To isolate hardware effects, power off before changing connections. Keep the
+Uno/MPU properly powered and their signal ground common, but disconnect the
+actuator supply (drive motor and steering) for the first test. Calibrate still,
+then start an angle command and rotate the chassis by hand before its timeout.
+Compare this with powered actuators. Failure only when they run points toward
+power sag, electrical interference, vibration or a moving/loose connection; it
+does not identify which one. Check short SDA/SCL wiring, 3.3 V power/logic and
+level shifting. Do not power motor/steering loads from the Uno's USB/5 V pin.
+If it also fails with actuators unpowered, report the I2C fault line; a subsequent
+display-disabled build can help isolate display current/timing involvement.
+
+**Raised wheels do not produce a chassis heading change.** A stationary rover
+can spin/steer its wheels without its Z gyro measuring a 90-degree turn. Once
+communication is working, a stationary `Turn` will stop on the no-progress guard (or its total timeout) unless
+you rotate the chassis or test the rover on the ground. Vibration can also make
+IMU-only estimated speed nonzero while the rover is stationary; that estimate is
+not ground-speed feedback and is not used to complete angle turns.
+
+
+## Early stop when a degree turn makes no progress
+
+Angle and Y turns now request neutral on both channels if measured heading does
+not make at least **1 degree of progress toward the target within 3000 ms**.
+The check uses heading change, not steering position or wheel rotation. This is
+in addition to the total timeout (default 15 seconds for Turn, 30 seconds for
+YTurn). Total timeout is still enforced even if sensor drift repeatedly satisfies
+the progress check. Reverse brake/neutral intervals do not count as stalled time;
+progress monitoring restarts for each Y-turn leg.
+
+Configure `TURN_NO_PROGRESS_MS` and `TURN_MIN_PROGRESS_DEGREES` in the main sketch
+for a rover that legitimately turns very slowly. The stop cancels the route and
+queued reverse, and displays dashes. Serial distinguishes `no heading progress`,
+`total motion timeout` and `sensor stale/fault`. `stop` remains available at any
+time. Neutral is a requested signal, not proof of physical braking; use motor
+power cutoff if the physical vehicle fails to respond.
+
+For raised-wheel tests, the whole chassis must be rotated by hand (with motor
+power disconnected), with progress starting before this three-second limit.
+Spinning wheels or changing steering without changing chassis heading will
+intentionally trigger the guard. Manual gas commands remain latched until
+changed/stopped; this new guard applies only to degree-based angle/Y motions.

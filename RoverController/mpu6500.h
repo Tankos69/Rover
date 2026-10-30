@@ -10,6 +10,9 @@ class Mpu6500 {
                  DATA_READ, NO_SAMPLES, SAMPLE_GAP, SATURATED, CAL_MOVING,
                  CAL_GYRO_NOISE, CAL_ACCEL_NOISE };
   Failure error=NONE;
+  // Frozen with the first latched fault; no extra I2C transactions for status.
+  uint8_t i2cAddress=0, i2cRegister=0, i2cTxStatus=0, i2cRequested=0, i2cReceived=0;
+  bool i2cTimeout=false;
   uint32_t sampleGapMs=0;
   bool ready=false, calibrating=false, fault=false;
   float yaw=0, speed=0, pitch=0, temperature=0;
@@ -97,13 +100,27 @@ class Mpu6500 {
   float sum_[3]={},squares_[3]={},bias_[3]={},accelSum_=0,accelSquares_=0;
   void fail(Failure why) { ready=false; calibrating=false; fault=true; error=why; }
   static int16_t be(const uint8_t* p) { return int16_t(uint16_t(p[0])<<8|p[1]); }
+  void transaction(uint8_t reg, uint8_t requested) {
+    i2cAddress=address_; i2cRegister=reg; i2cTxStatus=0;
+    i2cRequested=requested; i2cReceived=0; i2cTimeout=false;
+    Wire.clearWireTimeoutFlag();
+  }
   bool write(uint8_t reg,uint8_t value) {
+    transaction(reg,0);
     Wire.beginTransmission(address_); Wire.write(reg); Wire.write(value);
-    return Wire.endTransmission()==0;
+    i2cTxStatus=Wire.endTransmission();
+    i2cTimeout=Wire.getWireTimeoutFlag();
+    return i2cTxStatus==0 && !i2cTimeout;
   }
   bool read(uint8_t reg,uint8_t* data,uint8_t n) {
+    transaction(reg,n);
     Wire.beginTransmission(address_); Wire.write(reg);
-    if (Wire.endTransmission(false)!=0 || Wire.requestFrom(address_,n,uint8_t(true))!=n) return false;
+    i2cTxStatus=Wire.endTransmission(false);
+    i2cTimeout=Wire.getWireTimeoutFlag();
+    if (i2cTxStatus!=0 || i2cTimeout) return false;
+    i2cReceived=Wire.requestFrom(address_,n,uint8_t(true));
+    i2cTimeout=Wire.getWireTimeoutFlag();
+    if (i2cReceived!=n || i2cTimeout) return false;
     for (uint8_t i=0;i<n;++i) data[i]=Wire.read();
     return true;
   }

@@ -28,20 +28,25 @@ inline Motion YTurn(int forwardGas, int steering, int reverseGas=-60, uint32_t t
 }
 class MotionControl {
  public:
+  enum Failure { NO_FAILURE, BAD_REQUEST, SENSOR_FAULT, TIMEOUT, NO_PROGRESS };
+  Failure failure=NO_FAILURE;
+  MotionControl(uint32_t progressTimeoutMs=3000, float minProgress=1.0f)
+      : progressTimeoutMs_(progressTimeoutMs), minProgress_(minProgress) {}
   bool active=false, failed=false;
   int gas=0, steering=0;
   bool hasTurn=false, displayFault=false;
   float turnedDegrees=0;
   void stop() { active=false; gas=steering=0; }
   bool start(Motion m, uint32_t now, float yaw, bool ready, bool speedEnabled) {
-    stop(); failed=false;
+    stop(); failed=false; failure=NO_FAILURE;
     if (!ready || m.gas < -100 || m.gas > 100 || m.steering < -100 ||
         m.steering > 100 || !isfinite(m.target) || m.target<=0 || !m.limitMs ||
         ((m.kind==ANGLE || m.kind==Y_TURN) && (!m.gas || !m.steering)) ||
         (m.kind==Y_TURN && (m.gas<=0 || m.reverseGas>=0 || m.reverseGas< -100)) ||
         ((m.kind==ACCELERATE || m.kind==CRUISE) && (!speedEnabled || m.gas<=0 || m.target>3))) {
-      failed=true; return false;
+      failed=true; failure=BAD_REQUEST; return false;
     }
+    lastProgress_=now; checkpoint_=0;
     motion_=m; started_=last_=now; origin_=yaw; phase_=0; integral_=0;
     gas=m.gas; steering=m.steering;
     sign_=(m.steering>0 ? 1 : -1)*(m.gas>0 ? 1 : -1);
@@ -53,7 +58,7 @@ class MotionControl {
   // Return true when outputs change or the motion finishes/fails.
   bool update(uint32_t now, float yaw, float speed, bool fresh, bool shifting) {
     if (!active) return false;
-    if (!fresh || !isfinite(yaw) || !isfinite(speed)) return fault();
+    if (!fresh || !isfinite(yaw) || !isfinite(speed)) return fault(SENSOR_FAULT);
     if (motion_.kind==ANGLE || motion_.kind==Y_TURN)
       turnedDegrees=(yaw-origin_)*sign_;
     if (motion_.kind==CRUISE) {
@@ -70,15 +75,24 @@ class MotionControl {
       if (next>motion_.gas) next=motion_.gas;
       bool changed=gas!=next; gas=next; return changed;
     }
-    if (uint32_t(now-started_)>=motion_.limitMs) return fault();
+    if (uint32_t(now-started_)>=motion_.limitMs) return fault(TIMEOUT);
     if (motion_.kind==ACCELERATE) {
       if (speed>=motion_.target) { stop(); return true; }
       return false;
     }
     float progress=(yaw-origin_)*sign_;
     float goal=motion_.kind==Y_TURN ? (phase_+1)*60.0f : motion_.target;
-    if (progress<goal) return false;
+    if (progress<goal) {
+      if (shifting || progress>=checkpoint_+minProgress_) {
+        // No progress is expected during the reverse brake/neutral interval.
+        lastProgress_=now; checkpoint_=progress;
+      } else if (uint32_t(now-lastProgress_)>=progressTimeoutMs_) {
+        return fault(NO_PROGRESS);
+      }
+      return false;
+    }
     if (motion_.kind==Y_TURN && phase_<2) {
+      lastProgress_=now; checkpoint_=progress;
       ++phase_;
       gas=phase_==1 ? motion_.reverseGas : motion_.gas;
       steering=phase_==1 ? -motion_.steering : motion_.steering;
@@ -87,13 +101,15 @@ class MotionControl {
   }
  private:
   Motion motion_={TIMED,0,0,0,0};
-  uint32_t started_=0,last_=0;
+  uint32_t started_=0,last_=0,lastProgress_=0;
+  uint32_t progressTimeoutMs_;
+  float minProgress_,checkpoint_=0;
   float origin_=0,integral_=0;
   int sign_=1;
   uint8_t phase_=0;
-  bool fault() {
+  bool fault(Failure why) {
     if (motion_.kind==ANGLE || motion_.kind==Y_TURN) displayFault=true;
-    stop(); failed=true; return true;
+    stop(); failed=true; failure=why; return true;
   }
 };
 }
