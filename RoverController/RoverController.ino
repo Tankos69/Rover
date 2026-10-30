@@ -76,6 +76,7 @@ const rover::Step PROGRAM[] = {
 #if ROVER_ENABLE_DISPLAY
 TurnDisplay turnDisplay;
 ISR(TIMER2_COMPA_vect) { turnDisplay.tick(); }
+ISR(TIMER2_COMPB_vect) { turnDisplay.light(); }
 #endif
 Mpu6500 imu;
 rover::MotionControl motion;

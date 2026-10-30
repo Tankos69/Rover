@@ -29,9 +29,9 @@ class TurnDisplay {
     }
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
       TCCR2A=0; TCCR2B=0; TIMSK2=0; TCNT2=0;
-      OCR2A=249; TIFR2=_BV(OCF2A);
+      OCR2A=249; OCR2B=16; TIFR2=_BV(OCF2A)|_BV(OCF2B);
       TCCR2A=_BV(WGM21);
-      TIMSK2=_BV(OCIE2A);
+      TIMSK2=_BV(OCIE2A)|_BV(OCIE2B);
       TCCR2B=_BV(CS22); // 16 MHz / 64 / 250 = 1000 digit scans/sec
     }
   }
@@ -44,8 +44,12 @@ class TurnDisplay {
   }
   // Called at 1 kHz from Timer2. No delays, Wire, Serial, or motor timer use.
   void tick() {
-    *ports_[7+digit_] &= ~masks_[7+digit_]; // blank before changing segments
+    for (uint8_t i=0;i<4;++i) *ports_[7+i] &= ~masks_[7+i];
     digit_=(digit_+1)&3;
+  }
+  // Compare B occurs about 64 us into the next slot: give NPNs time to turn
+  // fully off before changing a..g, then enable only the selected digit.
+  void light() {
     uint8_t segments=digits_[digit_];
     for (uint8_t i=0;i<7;++i) {
       if (segments & (1<<i)) *ports_[i] |= masks_[i];

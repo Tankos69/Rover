@@ -190,7 +190,8 @@ change. If segments/digits are wrong, recheck pin numbering and polarity.
 ## Timing and verification
 
 Timer2 scans one digit every 1 ms (250 Hz per complete four-digit refresh).
-The ISR blanks the previous digit before changing segments to reduce ghosting.
+The scan blanks all digits, then uses a second compare about 64 microseconds
+later to change segments and select one digit, allowing transistor turn-off.
 It keeps refreshing during normal Wire/Serial waits without delays in the main
 loop. Timer1 continues to generate the motor signals; Timer0 still runs millis().
 
@@ -210,3 +211,23 @@ g++ -std=c++11 -Wall -Wextra -Werror tests/display_test.cpp -o /tmp/rover-displa
 /tmp/rover-display-test
 python3 tests/output_test.py
 ```
+
+## Why equal digits may work while mixed digits do not
+
+The digit outputs are **active HIGH because they drive NPN bases**. If you connect
+the four display cathodes directly to A0..A3 instead of using transistors, LOW
+turns a digit on: three digits become selected instead of one. Their different
+segment patterns overlap. `4444` may look fine while `1234` looks nonsensical.
+This is not proof of a broken display or incorrect numeral encoding.
+
+Power off and replace each direct common-cathode connection with its specified
+NPN driver: common cathode → collector, emitter → GND, Uno output → 2.2 kΩ →
+base, and base → 10 kΩ → GND. Check transistor lead order. The segment resistors
+remain in place. Do not just remove resistors or invert wires with power on.
+
+The driver also now blanks all digits before each switch and uses a second
+Timer2 compare about 64 microseconds later to change segments and enable one
+digit. This leaves time for transistor turn-off and reduces switching ghosting.
+No blocking delay is used. Physical wiring remains necessary; blanking does not
+make direct-cathode wiring compatible. See the standalone test's `digit` and
+`segment` commands to verify one position/segment at a time after wiring.

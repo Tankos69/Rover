@@ -35,8 +35,8 @@ static uint32_t fakeMillis = 0;
 static uint32_t millis() { return fakeMillis; }
 static volatile uint16_t OCR1A, OCR1B, ICR1, TCNT1;
 static volatile uint8_t TCCR1A, TCCR1B, TIMSK1, TIFR1;
-static volatile uint8_t TCCR2A,TCCR2B,TIMSK2,TCNT2,OCR2A,TIFR2;
-enum {OCF2A=1,WGM21=1,OCIE2A=1,CS22=2};
+static volatile uint8_t TCCR2A,TCCR2B,TIMSK2,TCNT2,OCR2A,OCR2B,TIFR2;
+enum {OCF2A=1,OCF2B=2,WGM21=1,OCIE2A=1,OCIE2B=2,CS22=2};
 #define PORTB ports[1]
 enum {PB1=1, PB2=2, COM1A1=7, COM1B1=5, WGM11=1, WGM12=3,
       WGM13=4, CS11=1, OCIE1A=1, OCIE1B=2, OCF1A=1, OCF1B=2, TOV1=0};
@@ -256,11 +256,13 @@ int main() {
 #if ROVER_ENABLE_DISPLAY
   bool motorBefore[2]={high(THROTTLE_PIN), high(STEERING_PIN)};
   turnDisplay.begin();
-  assert(OCR2A==249 && (TIMSK2 & _BV(OCIE2A)));
+  assert(OCR2A==249 && OCR2B==16 && (TIMSK2 & _BV(OCIE2A)) && (TIMSK2 & _BV(OCIE2B)));
   turnDisplay.show(180,true,true);
   const uint8_t expected[4]={0,0x06,0x7f,0x3f};
   for (int digit=0;digit<4;++digit) {
     TIMER2_COMPA_vect();
+    for (int i=0;i<4;++i) assert(!high(DISPLAY_PINS[7+i]));
+    TIMER2_COMPB_vect();
     for (int i=0;i<4;++i) assert(high(DISPLAY_PINS[7+i])==(i==digit && expected[digit]!=0));
     for (int i=0;i<7;++i) assert(high(DISPLAY_PINS[i])==bool(expected[digit] & (1<<i)));
   }
@@ -268,6 +270,7 @@ int main() {
   turnDisplay.show(0,true,false);
   for (int digit=0;digit<4;++digit) {
     TIMER2_COMPA_vect();
+    TIMER2_COMPB_vect();
     assert(high(DISPLAY_PINS[7+digit]));
     assert(high(DISPLAY_PINS[6])); // Fault dashes.
     assert(!high(DISPLAY_PINS[0]));

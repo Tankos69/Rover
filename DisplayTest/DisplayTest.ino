@@ -24,8 +24,12 @@ uint8_t inputLength=0;
 bool lineOverflow=false;
 
 ISR(TIMER2_COMPA_vect) {
-  *digitPorts[scanDigit] &= ~digitMasks[scanDigit]; // Blank before changing.
+  for (uint8_t i=0;i<4;++i) *digitPorts[i] &= ~digitMasks[i];
   scanDigit=(scanDigit+1)&3;
+  // Compare B updates segments later, after transistor turn-off time.
+}
+
+ISR(TIMER2_COMPB_vect) {
   uint8_t segments=shown[scanDigit];
   for (uint8_t i=0;i<7;++i) {
     if (segments & (1<<i)) *segmentPorts[i] |= segmentMasks[i];
@@ -48,8 +52,20 @@ void handleLine(const char* text) {
     return;
   }
   if (!strcmp(text,"help")) {
-    Serial.println(F("Send exactly four digits (0000..9999), or clear. Example: 0042"));
+    Serial.println(F("Send 0042, clear, digit 1 6, or segment a (a..g)."));
     return;
+  }
+  if (strlen(text)==9 && !strncmp(text,"digit ",6) &&
+      text[6]>='1' && text[6]<='4' && text[7]==' ' && text[8]>='0' && text[8]<='9') {
+    uint8_t next[4]={};
+    next[text[6]-'1']=NUMERALS[text[8]-'0'];
+    setDigits(next);
+    Serial.println(F("Only the requested digit is lit.")); return;
+  }
+  if (strlen(text)==9 && !strncmp(text,"segment ",8) && text[8]>='a' && text[8]<='g') {
+    const uint8_t next[4]={uint8_t(1<<(text[8]-'a')),0,0,0};
+    setDigits(next);
+    Serial.println(F("Only the requested segment on digit 1 is lit.")); return;
   }
   if (strlen(text)!=4) {
     Serial.println(F("Enter exactly four digits, e.g. 0042. Display unchanged."));
@@ -94,8 +110,8 @@ void setup() {
   }
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
     TCCR2A=0; TCCR2B=0; TIMSK2=0; TCNT2=0;
-    OCR2A=249; TIFR2=_BV(OCF2A);
-    TCCR2A=_BV(WGM21); TIMSK2=_BV(OCIE2A); TCCR2B=_BV(CS22);
+    OCR2A=249; OCR2B=16; TIFR2=_BV(OCF2A)|_BV(OCF2B);
+    TCCR2A=_BV(WGM21); TIMSK2=_BV(OCIE2A)|_BV(OCIE2B); TCCR2B=_BV(CS22);
   }
   Serial.begin(115200);
   Serial.println(F("SH5461AS test: startup 8888. Send four digits, clear, or help."));

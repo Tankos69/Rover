@@ -43,3 +43,40 @@ Timer2 refreshes the display independently of serial input, at 1 kHz digit scans
 Timer2 users. Physical pinout, brightness and transistor wiring need verification
 on your display. After testing, upload the RoverController sketch again to
 restore rover control.
+
+## Mixed or malformed digits
+
+**If repeated digits work but `1234` produces overlapping or malformed symbols,
+check the digit-driver wiring first.** This firmware drives an NPN base HIGH to
+select one digit. With common cathodes connected straight to Uno pins, LOW
+selects a digit instead: three digits become active when the code intends one.
+Repeated patterns can look correct even though selection is wrong. Do not use
+this firmware with digit commons wired directly to GPIO; power off and install
+the four NPN circuits from the wiring guide.
+
+After correcting the hardware, these commands isolate wiring faults:
+
+```text
+digit 1 6
+digit 2 6
+digit 3 6
+digit 4 6
+segment a
+segment b
+segment c
+segment d
+segment e
+segment f
+segment g
+1234
+```
+
+`digit N V` lights only position N (1=leftmost) with numeral V; the other three
+are blank. `segment a` through `segment g` lights one segment on the leftmost
+digit only. A numeral malformed even in isolation points toward segment wiring,
+pinout or polarity; other positions lighting points toward digit wiring/drivers.
+
+The scan now has two phases: all digit drivers off, then about 64 microseconds
+later the segment pattern changes and the selected digit is enabled. This
+provides transistor turn-off time without busy-waiting. It reduces switching
+ghosting with the specified NPN circuit, but cannot correct wiring or polarity.
