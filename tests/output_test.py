@@ -12,6 +12,9 @@ ARDUINO = r"""
 #pragma once
 #include <stdint.h>
 #define A0 14
+#define A1 15
+#define A2 16
+#define A3 17
 #define A4 18
 #define A5 19
 #define OUTPUT 1
@@ -32,6 +35,8 @@ static uint32_t fakeMillis = 0;
 static uint32_t millis() { return fakeMillis; }
 static volatile uint16_t OCR1A, OCR1B, ICR1, TCNT1;
 static volatile uint8_t TCCR1A, TCCR1B, TIMSK1, TIFR1;
+static volatile uint8_t TCCR2A,TCCR2B,TIMSK2,TCNT2,OCR2A,TIFR2;
+enum {OCF2A=1,WGM21=1,OCIE2A=1,CS22=2};
 #define PORTB ports[1]
 enum {PB1=1, PB2=2, COM1A1=7, COM1B1=5, WGM11=1, WGM12=3,
       WGM13=4, CS11=1, OCIE1A=1, OCIE1B=2, OCF1A=1, OCF1B=2, TOV1=0};
@@ -248,6 +253,27 @@ int main() {
   assert(imu.accel[2]==0); // Fault preserves the rejected sample.
   send("status");
 
+#if ROVER_ENABLE_DISPLAY
+  bool motorBefore[2]={high(THROTTLE_PIN), high(STEERING_PIN)};
+  turnDisplay.begin();
+  assert(OCR2A==249 && (TIMSK2 & _BV(OCIE2A)));
+  turnDisplay.show(180,true,true);
+  const uint8_t expected[4]={0,0x06,0x7f,0x3f};
+  for (int digit=0;digit<4;++digit) {
+    TIMER2_COMPA_vect();
+    for (int i=0;i<4;++i) assert(high(DISPLAY_PINS[7+i])==(i==digit && expected[digit]!=0));
+    for (int i=0;i<7;++i) assert(high(DISPLAY_PINS[i])==bool(expected[digit] & (1<<i)));
+  }
+  assert(high(THROTTLE_PIN)==motorBefore[0] && high(STEERING_PIN)==motorBefore[1]);
+  turnDisplay.show(0,true,false);
+  for (int digit=0;digit<4;++digit) {
+    TIMER2_COMPA_vect();
+    assert(high(DISPLAY_PINS[7+digit]));
+    assert(high(DISPLAY_PINS[6])); // Fault dashes.
+    assert(!high(DISPLAY_PINS[0]));
+  }
+#endif
+
 }
 """
 
@@ -283,10 +309,10 @@ static FakeWire Wire;
         '#define ATOMIC_BLOCK(mode) for (bool once = true; once; once = false)\n'
     )
     (tmp / "test.cpp").write_text(HARNESS)
-    for gas, turn in [(9, 10), (10, 9), (4, 7), (2, 14), (14, 19), (9, 4), (7, 8)]:
+    for gas, turn in [(9, 10), (10, 9), (4, 7), (2, 14), (14, 19), (9, 4), (7, 8), (8, 11)]:
         command = [
             'g++', '-std=c++11', '-Wall', '-Wextra', '-Werror',
-            f'-DROVER_ENABLE_IMU={1 if gas==7 else 0}', '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
+            f'-DROVER_ENABLE_IMU={1 if gas==7 else 0}', f'-DROVER_ENABLE_DISPLAY={1 if gas==8 else 0}', '-D__AVR_ATmega328P__', '-DF_CPU=16000000UL',
             f'-DTHROTTLE_PIN={gas}', f'-DSTEERING_PIN={turn}',
             '-I' + str(tmp), '-I' + str(ROOT / 'RoverController'),
             str(tmp / 'test.cpp'), '-o', str(tmp / 'test'),
@@ -294,7 +320,8 @@ static FakeWire Wire;
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / 'test')], check=True)
         print(f'PASS: throttle={gas}, steering={turn}')
-    for gas, turn in [(0, 10), (9, 1), (20, 10), (9, 9), (18, 10)]:
+    command[command.index('-DROVER_ENABLE_IMU=0')]='-DROVER_ENABLE_IMU=1'
+    for gas, turn in [(0, 10), (9, 1), (20, 10), (9, 9), (18, 10), (2, 11), (8, 14)]:
         command[command.index(next(x for x in command if x.startswith('-DTHROTTLE_PIN=')))] = f'-DTHROTTLE_PIN={gas}'
         command[command.index(next(x for x in command if x.startswith('-DSTEERING_PIN=')))] = f'-DSTEERING_PIN={turn}'
         result = subprocess.run(command, capture_output=True, text=True)

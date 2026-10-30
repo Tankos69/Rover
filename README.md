@@ -6,6 +6,14 @@ It uses your measured frequency exactly as specified, rather than the more
 usual 50 Hz servo signal. Confirm the frequency and polarity on an oscilloscope
 before connecting the rover. The period is about **15.959 ms**.
 
+## Four-digit turn-progress display
+
+See [SH5461AS wiring and setup](DISPLAY_WIRING.md) for the bare common-cathode
+LED display, resistors, four transistor digit drivers and the enable setting.
+It displays measured whole degrees during angle/Y turns and retains the last
+value afterward. Display support defaults off; its default pins leave D8/D11
+and D9/D10 available for the motor signals.
+
 ## MPU-6500 integration
 
 See [sensor-controlled turns, experimental speed control and Y turns](SENSOR_CONTROL.md)

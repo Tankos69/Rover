@@ -30,6 +30,8 @@ class MotionControl {
  public:
   bool active=false, failed=false;
   int gas=0, steering=0;
+  bool hasTurn=false, displayFault=false;
+  float turnedDegrees=0;
   void stop() { active=false; gas=steering=0; }
   bool start(Motion m, uint32_t now, float yaw, bool ready, bool speedEnabled) {
     stop(); failed=false;
@@ -43,12 +45,17 @@ class MotionControl {
     motion_=m; started_=last_=now; origin_=yaw; phase_=0; integral_=0;
     gas=m.gas; steering=m.steering;
     sign_=(m.steering>0 ? 1 : -1)*(m.gas>0 ? 1 : -1);
+    if (m.kind==ANGLE || m.kind==Y_TURN) {
+      hasTurn=true; displayFault=false; turnedDegrees=0;
+    }
     active=true; return true;
   }
   // Return true when outputs change or the motion finishes/fails.
   bool update(uint32_t now, float yaw, float speed, bool fresh, bool shifting) {
     if (!active) return false;
     if (!fresh || !isfinite(yaw) || !isfinite(speed)) return fault();
+    if (motion_.kind==ANGLE || motion_.kind==Y_TURN)
+      turnedDegrees=(yaw-origin_)*sign_;
     if (motion_.kind==CRUISE) {
       if (uint32_t(now-started_)>=motion_.limitMs) { stop(); return true; }
       if (uint32_t(now-last_)<50 || shifting) return false;
@@ -84,7 +91,10 @@ class MotionControl {
   float origin_=0,integral_=0;
   int sign_=1;
   uint8_t phase_=0;
-  bool fault() { stop(); failed=true; return true; }
+  bool fault() {
+    if (motion_.kind==ANGLE || motion_.kind==Y_TURN) displayFault=true;
+    stop(); failed=true; return true;
+  }
 };
 }
 #endif

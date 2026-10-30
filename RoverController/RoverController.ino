@@ -8,6 +8,11 @@
 #include <string.h>
 #include "rover_control.h"
 #include "mpu6500.h"
+// Enable only after wiring the bare common-cathode display and NPN drivers.
+#ifndef ROVER_ENABLE_DISPLAY
+#define ROVER_ENABLE_DISPLAY 0
+#endif
+#include "turn_display.h"
 
 #ifndef ROVER_ENABLE_IMU
 #define ROVER_ENABLE_IMU 1
@@ -35,6 +40,8 @@ static_assert(STEERING_PIN >= 2 && STEERING_PIN <= A5,
 static_assert(THROTTLE_PIN != STEERING_PIN, "Output pins must be different");
 static_assert(!ROVER_ENABLE_IMU || (THROTTLE_PIN < A4 && STEERING_PIN < A4),
               "IMU uses A4/A5 for I2C; choose other output pins");
+static_assert(!ROVER_ENABLE_DISPLAY || (!displayUses(THROTTLE_PIN) && !displayUses(STEERING_PIN)),
+              "Motor pin conflicts with display: change motor or DISPLAY_PINS mapping");
 constexpr bool HARDWARE_PWM = (THROTTLE_PIN == 9 && STEERING_PIN == 10) ||
                               (THROTTLE_PIN == 10 && STEERING_PIN == 9);
 
@@ -66,6 +73,10 @@ const rover::Step PROGRAM[] = {
   {  0,  0, 1000},  // Stop; completion also holds neutral indefinitely
 };
 
+#if ROVER_ENABLE_DISPLAY
+TurnDisplay turnDisplay;
+ISR(TIMER2_COMPA_vect) { turnDisplay.tick(); }
+#endif
 Mpu6500 imu;
 rover::MotionControl motion;
 rover::Sequence sequence(PROGRAM, sizeof(PROGRAM) / sizeof(PROGRAM[0]));
@@ -420,6 +431,9 @@ void readSerial() {
 
 void setup() {
   beginSignals();  // Neutral outputs before serial initialization.
+#if ROVER_ENABLE_DISPLAY
+  turnDisplay.begin();
+#endif
   bootTime = millis();
   Serial.begin(115200);
   if (ROVER_ENABLE_IMU) imu.begin();
@@ -454,4 +468,7 @@ void loop() {
     if (sequence.running()) applyStep();
     else { neutral(); Serial.println(F("Program complete; neutral.")); }
   }
+#if ROVER_ENABLE_DISPLAY
+  turnDisplay.show(motion.turnedDegrees,motion.hasTurn,!motion.displayFault);
+#endif
 }

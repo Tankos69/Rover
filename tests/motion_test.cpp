@@ -8,7 +8,9 @@ int main() {
   assert(m.start(Turn(15,-100,30),0,350,true,false));
   assert(!m.update(10,360,0,true,false)); // Wrong direction cannot satisfy target.
   assert(!m.update(20,321,0,true,false));
+  assert(m.hasTurn && m.turnedDegrees==29);
   assert(m.update(30,320,0,true,false) && !m.active && !m.failed);
+  assert(m.turnedDegrees==30); m.stop(); assert(m.turnedDegrees==30);
   assert(m.start(Turn(15,100,30),0,350,true,false));
   assert(m.update(30,380,0,true,false) && !m.active); // Unwrapped crossing north.
   assert(m.start(Turn(-60,100,30),0,0,true,false));
@@ -16,10 +18,11 @@ int main() {
   assert(m.start(Turn(15,100,30,100),0,0,true,false));
   assert(m.update(100,0,0,true,false) && m.failed); // No rotation: timeout.
   assert(m.start(Turn(15,100,30),0,0,true,false));
-  assert(m.update(1,0,0,false,false) && m.failed); // Sensor loss.
+  assert(m.update(1,0,0,false,false) && m.failed && m.displayFault); // Sensor loss.
   assert(m.start(Turn(15,100,30,100),UINT32_MAX-50,0,true,false));
   assert(m.update(49,0,0,true,false) && m.failed);
   assert(m.start(YTurn(15,-100),0,0,true,false));
+  assert(m.turnedDegrees==0 && !m.displayFault);
   assert(m.update(100,-60,0,true,false) && m.gas==-60 && m.steering==100);
   assert(m.update(200,-120,0,true,false) && m.gas==15 && m.steering==-100);
   assert(m.update(300,-180,0,true,false) && !m.active);
