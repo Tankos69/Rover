@@ -130,6 +130,14 @@ display. Do not also use them for motor outputs. You may edit `DISPLAY_PINS` in
 motor pins. The sketch gives a compile error on a conflict when display support
 is enabled. D0/D1 stay reserved for Serial, A4/A5 for I2C.
 
+## Direct common-cathode alternative
+
+For common-cathode digit commons wired straight to Uno pins, use
+[DirectCathodeDisplayTest](DirectCathodeDisplayTest/README.md), not the NPN driver
+below or the common-anode test. It includes a limited 1 kΩ-resistor test mode
+for numerals 1/4/7 and single segments. Full-number mode requires at least 2 kΩ
+per segment. Its guide provides the same complete 11-pin signal map.
+
 ## Common-anode alternative
 
 If your display is confirmed **common anode**, use the separate

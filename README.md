@@ -10,6 +10,8 @@ before connecting the rover. The period is about **15.959 ms**.
 
 See [SH5461AS wiring and setup](DISPLAY_WIRING.md) for the bare common-cathode
 LED display, resistors, four transistor digit drivers and the enable setting.
+For **direct common-cathode wiring with your 1 kΩ resistors**, see
+[DirectCathodeDisplayTest](DirectCathodeDisplayTest/README.md) (limited digits 1/4/7).
 For the common-cathode/NPN standalone test, see [DisplayTest](DisplayTest/README.md).
 For a **confirmed common-anode** display wired directly with 2.2 kΩ segment
 resistors, see [CommonAnodeDisplayTest](CommonAnodeDisplayTest/README.md).
